@@ -13,7 +13,7 @@ The desktop provides a touchpad, on-screen keyboard, input profiles, and externa
 
 ## Build
 
-Use Linux with Bash, Git, Python 3, zstd, ripgrep, and JDK 17. Set ANDROID_HOME to an SDK with the following packages.
+Use Linux with Bash, Git, Python 3, zstd, and JDK 17. Set ANDROID_HOME to an SDK with the following packages.
 
 ~~~sh
 sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;34.0.0' 'ndk;24.0.8215888' 'cmake;3.22.1'

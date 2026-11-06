@@ -45,3 +45,4 @@ jobs:
           name: Winblow-0.1.0-arm64
           path: dist/Winblow-0.1.0-arm64.apk
           if-no-files-found: error
+          compression-level: 0

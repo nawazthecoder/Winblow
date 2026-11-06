@@ -6,15 +6,20 @@ sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 tools="${sdk:?Set ANDROID_HOME}/build-tools/34.0.0"
 
 "$tools/apksigner" verify --verbose "$apk"
-badging="$("$tools/aapt" dump badging "$apk")"
-rg -q "package: name='com.winblowx' .*versionName='0.1.0'" <<< "$badging"
-rg -q "^application-label:'Winblow'$" <<< "$badging"
-rg -q "^native-code: 'arm64-v8a' *$" <<< "$badging"
 
-python3 - "$apk" <<'PY'
+python3 - "$apk" "$tools/aapt" <<'PY'
 import struct
+import subprocess
 import sys
 from zipfile import ZipFile
+
+badging = subprocess.check_output([sys.argv[2], "dump", "badging", sys.argv[1]], text=True)
+lines = {line.rstrip() for line in badging.splitlines()}
+package = "package: name='com.winblowx' versionCode='1' versionName='0.1.0'"
+if not any(line.startswith(package) for line in lines):
+    raise SystemExit("Unexpected Winblow package name or version")
+if "application-label:'Winblow'" not in lines or "native-code: 'arm64-v8a'" not in lines:
+    raise SystemExit("Unexpected Winblow label or ABI")
 
 with ZipFile(sys.argv[1]) as apk:
     bad = apk.testzip()
