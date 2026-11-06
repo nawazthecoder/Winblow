@@ -1,0 +1,33 @@
+name: Build Winblow for Android
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android build tools
+        run: |
+          sdkmanager --licenses <<< "$(printf 'y\n%.0s' {1..30})" >/dev/null
+          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;34.0.0' 'ndk;24.0.8215888' 'cmake;3.22.1'
+      - name: Build and verify APK
+        run: ./scripts/build.sh
+      - name: Test Windows program validation
+        run: bash scripts/test-program-import.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Winblow-0.1.0-arm64
+          path: dist/Winblow-0.1.0-arm64.apk
+          if-no-files-found: error

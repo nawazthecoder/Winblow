@@ -1,0 +1,1172 @@
+diff --git a/app/build.gradle b/app/build.gradle
+index 7690275..64a6d25 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -5,11 +5,11 @@ android {
+     compileSdk 35
+ 
+     defaultConfig {
+-        applicationId 'com.winlator'
++        applicationId 'com.winblowx'
+         minSdkVersion 26
+         targetSdkVersion 28
+-        versionCode 33
+-        versionName "11.2"
++        versionCode 1
++        versionName '0.1.0'
+     }
+ 
+     buildTypes {
+@@ -29,6 +29,12 @@ android {
+ 
+     ndkVersion '24.0.8215888'
+ 
++    packagingOptions {
++        jniLibs {
++            useLegacyPackaging true
++        }
++    }
++
+     externalNativeBuild {
+         cmake {
+             version '3.22.1'
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index 1262c0d..58985d5 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -1,5 +1,5 @@
+ <?xml version="1.0" encoding="utf-8" standalone="no"?>
+-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.winlator">
++<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+     <uses-feature
+         android:glEsVersion="0x00020000"
+         android:required="true" />
+@@ -17,10 +17,10 @@
+     <uses-permission android:name="android.permission.WAKE_LOCK" />
+ 
+     <application
+-        android:icon="@mipmap/ic_launcher"
++        android:icon="@drawable/winblow_icon"
++        android:allowBackup="false"
+         android:appCategory="game"
+         android:isGame="true"
+-        android:extractNativeLibs="true"
+         android:allowAudioPlaybackCapture="true"
+         android:label="@string/app_name">
+ 
+@@ -64,7 +64,7 @@
+ 
+         <provider
+             android:name="androidx.core.content.FileProvider"
+-            android:authorities="com.winlator.FileProvider"
++            android:authorities="${applicationId}.FileProvider"
+             android:exported="false"
+             android:grantUriPermissions="true">
+ 
+diff --git a/app/src/main/cpp/gladiorenderer/include/gladio.h b/app/src/main/cpp/gladiorenderer/include/gladio.h
+index 8e55d3b..94aa5ad 100644
+--- a/app/src/main/cpp/gladiorenderer/include/gladio.h
++++ b/app/src/main/cpp/gladiorenderer/include/gladio.h
+@@ -13,7 +13,7 @@
+ #define THREAD_POOL_NUM_THREADS 4
+ #define PIXEL_READ_CACHE_SKIP_FRAMES 3
+ #define SKIP_GL_FINISH 1
+-#define X11_SERVER_PATH "/data/data/com.winlator/files/rootfs/tmp/.X11-unix/X0"
++#define X11_SERVER_PATH "/data/data/com.winblowx/files/rootfs/tmp/.X11-unix/X0"
+ 
+ #define GL_STRING_VERSION "3.3"
+ #define GL_STRING_RENDERER "Gladio"
+@@ -298,4 +298,4 @@ static inline uint8_t indexOfGLTarget(GLenum target) {
+     }
+ }
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/app/src/main/cpp/vortekrenderer/include/vortek.h b/app/src/main/cpp/vortekrenderer/include/vortek.h
+index 5292644..0287dda 100644
+--- a/app/src/main/cpp/vortekrenderer/include/vortek.h
++++ b/app/src/main/cpp/vortekrenderer/include/vortek.h
+@@ -5,7 +5,7 @@
+ #define MEMORY_POOL_MAX_SIZE 65536
+ #define SERVER_RING_BUFFER_SIZE 4194304
+ #define CLIENT_RING_BUFFER_SIZE 262144
+-#define VORTEK_SERVER_PATH "/data/data/com.winlator/files/rootfs/tmp/.vortek/V0"
++#define VORTEK_SERVER_PATH "/data/data/com.winblowx/files/rootfs/tmp/.vortek/V0"
+ #define VK_HANDLE_BYTE_COUNT 8
+ #define THREAD_POOL_NUM_THREADS 8
+ 
+@@ -264,4 +264,4 @@ static inline int vt_recv(RingBuffer* ring, char** inputBuffer, int* bufferSize,
+     return requestCode;
+ }
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/app/src/main/cpp/winlator/include/winlator.h b/app/src/main/cpp/winlator/include/winlator.h
+index 2314314..92f4298 100644
+--- a/app/src/main/cpp/winlator/include/winlator.h
++++ b/app/src/main/cpp/winlator/include/winlator.h
+@@ -11,7 +11,7 @@
+ #define BITMASK_UNSET(bits, flag) bits &= ~flag
+ #define GETEXP(x) (31 - __builtin_clz(x))
+ 
+-#define APP_CACHE_DIR "/data/data/com.winlator/cache"
++#define APP_CACHE_DIR "/data/data/com.winblowx/cache"
+ #define LIBVULKAN_PATH "/system/lib64/libvulkan.so"
+ 
+ #define CLOSEFD(x) \
+@@ -60,4 +60,4 @@ static inline pid_t currentThreadId() {
+     while (0)
+ #endif
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/app/src/main/java/com/winlator/ContainersFragment.java b/app/src/main/java/com/winlator/ContainersFragment.java
+index aab4c0a..71b4039 100644
+--- a/app/src/main/java/com/winlator/ContainersFragment.java
++++ b/app/src/main/java/com/winlator/ContainersFragment.java
+@@ -1,6 +1,7 @@
+ package com.winlator;
+ 
+ import android.app.Activity;
++import android.app.ActivityManager;
+ import android.content.Context;
+ import android.content.Intent;
+ import android.os.Build;
+@@ -18,6 +19,7 @@ import android.widget.TextView;
+ 
+ import androidx.annotation.NonNull;
+ import androidx.annotation.Nullable;
++import androidx.appcompat.app.AlertDialog;
+ import androidx.appcompat.app.AppCompatActivity;
+ import androidx.core.content.ContextCompat;
+ import androidx.fragment.app.Fragment;
+@@ -28,17 +30,27 @@ import androidx.recyclerview.widget.RecyclerView;
+ 
+ import com.winlator.container.Container;
+ import com.winlator.container.ContainerManager;
++import com.winlator.container.DXWrappers;
++import com.winlator.container.GraphicsDrivers;
++import com.winlator.box64.Box64Preset;
+ import com.winlator.contentdialog.ContentDialog;
+ import com.winlator.contentdialog.StorageInfoDialog;
+ import com.winlator.core.PreloaderDialog;
++import com.winlator.core.AppUtils;
++import com.winlator.core.GPUHelper;
++import com.winlator.xenvironment.RootFSInstaller;
+ import com.winlator.xenvironment.RootFS;
+ 
++import org.json.JSONException;
++import org.json.JSONObject;
++
++import java.io.File;
+ import java.util.ArrayList;
+ import java.util.List;
+ 
+ public class ContainersFragment extends Fragment {
+     private RecyclerView recyclerView;
+-    private TextView emptyTextView;
++    private View emptyState;
+     private ContainerManager manager;
+     private PreloaderDialog preloaderDialog;
+ 
+@@ -63,7 +75,8 @@ public class ContainersFragment extends Fragment {
+         FrameLayout frameLayout = (FrameLayout)inflater.inflate(R.layout.containers_fragment, container, false);
+         recyclerView = frameLayout.findViewById(R.id.RecyclerView);
+         Context context = recyclerView.getContext();
+-        emptyTextView = frameLayout.findViewById(R.id.TVEmptyText);
++        emptyState = frameLayout.findViewById(R.id.LLWinblowEmpty);
++        frameLayout.findViewById(R.id.BTWinblowCreate).setOnClickListener(button -> showCreateDesktop());
+         recyclerView.setLayoutManager(new LinearLayoutManager(context));
+ 
+         DividerItemDecoration itemDecoration = new DividerItemDecoration(recyclerView.getContext(), DividerItemDecoration.VERTICAL);
+@@ -75,7 +88,7 @@ public class ContainersFragment extends Fragment {
+     private void loadContainersList() {
+         ArrayList<Container> containers = manager.getContainers();
+         recyclerView.setAdapter(new ContainersAdapter(containers));
+-        if (containers.isEmpty()) emptyTextView.setVisibility(View.VISIBLE);
++        emptyState.setVisibility(containers.isEmpty() ? View.VISIBLE : View.GONE);
+     }
+ 
+     @Override
+@@ -86,17 +99,65 @@ public class ContainersFragment extends Fragment {
+     @Override
+     public boolean onOptionsItemSelected(MenuItem menuItem) {
+         if (menuItem.getItemId() == R.id.menu_item_add) {
+-            if (!RootFS.find(getContext()).isValid()) return false;
+-            FragmentManager fragmentManager = getParentFragmentManager();
+-            fragmentManager.beginTransaction()
+-                .addToBackStack(null)
+-                .replace(R.id.FLFragmentContainer, new ContainerDetailFragment())
+-                .commit();
++            showCreateDesktop();
+             return true;
+         }
+         else return super.onOptionsItemSelected(menuItem);
+     }
+ 
++    private void showCreateDesktop() {
++        MainActivity activity = (MainActivity)requireActivity();
++        if (!RootFS.find(activity).isValid()) {
++            RootFSInstaller.installIfNeeded(activity);
++            return;
++        }
++
++        new AlertDialog.Builder(activity)
++            .setTitle(R.string.winblow_create_desktop)
++            .setItems(R.array.winblow_desktop_profiles, (dialog, item) -> createDesktop(item == 0))
++            .setNeutralButton(R.string.winblow_manual_setup, (dialog, button) -> {
++                FragmentManager fragments = getParentFragmentManager();
++                fragments.beginTransaction()
++                    .addToBackStack(null)
++                    .replace(R.id.FLFragmentContainer, new ContainerDetailFragment())
++                    .commit();
++            })
++            .setNegativeButton(android.R.string.cancel, null)
++            .show();
++    }
++
++    private void createDesktop(boolean windows10) {
++        Context context = requireContext();
++        ActivityManager activityManager = (ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
++        ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
++        activityManager.getMemoryInfo(memory);
++        boolean lowMemory = activityManager.isLowRamDevice() || memory.totalMem < 5L * 1024 * 1024 * 1024;
++        boolean adreno = GPUHelper.getAdrenoModelId(context) > 0;
++
++        JSONObject settings = new JSONObject();
++        try {
++            String profile = getString(windows10 ? R.string.winblow_windows10 : R.string.winblow_windows11);
++            settings.put("name", profile + " · " + manager.getNextContainerId());
++            settings.put("windowsVersion", windows10 ? "win10" : "win11");
++            settings.put("screenSize", lowMemory ? "960x540" : Container.DEFAULT_SCREEN_SIZE);
++            settings.put("graphicsDriver", adreno ? GraphicsDrivers.getDefaultDriver(context) : GraphicsDrivers.VORTEK + "," + GraphicsDrivers.VIRGL);
++            settings.put("dxwrapper", adreno ? DXWrappers.DXVK : DXWrappers.WINED3D);
++            settings.put("box64Preset", Box64Preset.CONSERVATIVE);
++        }
++        catch (JSONException e) {
++            AppUtils.showToast(context, R.string.winblow_create_failed);
++            return;
++        }
++
++        preloaderDialog.show(R.string.creating_container);
++        manager.createContainerAsync(settings, container -> {
++            preloaderDialog.close();
++            if (getView() == null) return;
++            if (container == null) AppUtils.showToast(requireContext(), R.string.winblow_create_failed);
++            else loadContainersList();
++        });
++    }
++
+     private class ContainersAdapter extends RecyclerView.Adapter<ContainersAdapter.ViewHolder> {
+         private final List<Container> data;
+ 
+@@ -146,6 +207,12 @@ public class ContainersFragment extends Fragment {
+ 
+             listItemMenu.setOnMenuItemClickListener((menuItem) -> {
+                 switch (menuItem.getItemId()) {
++                    case R.id.menu_item_winblow_import:
++                        activity.pickWindowsProgram(container);
++                        break;
++                    case R.id.menu_item_winblow_notepad:
++                        activity.launchWindowsProgram(container, new File(container.getRootDir(), ".wine/drive_c/windows/notepad.exe"));
++                        break;
+                     case R.id.menu_item_file_manager:
+                         activity.showFragment(new ContainerFileManagerFragment(container.id));
+                         break;
+@@ -173,6 +240,9 @@ public class ContainersFragment extends Fragment {
+                     case R.id.menu_item_info:
+                         (new StorageInfoDialog(activity, container)).show();
+                         break;
++                    case R.id.menu_item_winblow_downloads:
++                        activity.requestDownloadsAccess();
++                        break;
+                 }
+                 return true;
+             });
+diff --git a/app/src/main/java/com/winlator/MainActivity.java b/app/src/main/java/com/winlator/MainActivity.java
+index dd126b1..93cbfa6 100644
+--- a/app/src/main/java/com/winlator/MainActivity.java
++++ b/app/src/main/java/com/winlator/MainActivity.java
+@@ -9,8 +9,11 @@ import android.content.pm.PackageManager;
+ import android.content.res.Configuration;
+ import android.net.Uri;
+ import android.os.Bundle;
++import android.util.Log;
+ import android.view.MenuItem;
+ 
++import androidx.activity.result.ActivityResultLauncher;
++import androidx.activity.result.contract.ActivityResultContracts;
+ import androidx.annotation.IntRange;
+ import androidx.annotation.NonNull;
+ import androidx.annotation.Nullable;
+@@ -25,13 +28,19 @@ import androidx.fragment.app.FragmentManager;
+ import androidx.preference.PreferenceManager;
+ 
+ import com.google.android.material.navigation.NavigationView;
++import com.winlator.container.Container;
++import com.winlator.container.ContainerManager;
+ import com.winlator.contentdialog.AboutDialog;
+ import com.winlator.core.AppUtils;
+ import com.winlator.core.Callback;
+ import com.winlator.core.LocaleHelper;
+ import com.winlator.core.PreloaderDialog;
++import com.winlator.core.WindowsProgramImporter;
+ import com.winlator.xenvironment.RootFSInstaller;
+ 
++import java.io.File;
++import java.io.IOException;
++
+ public class MainActivity extends AppCompatActivity implements NavigationView.OnNavigationItemSelectedListener {
+     public static final boolean DEBUG_MODE = false; // FIXME change to false
+     public static final @IntRange(from = 1, to = 19) byte CONTAINER_PATTERN_COMPRESSION_LEVEL = 9;
+@@ -46,11 +55,15 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
+     private Callback<Uri> openFileCallback;
+     private SharedPreferences preferences;
+     private Fragment currentFragment;
++    private int importContainerId;
++    private final ActivityResultLauncher<String[]> openProgram = registerForActivityResult(
++        new ActivityResultContracts.OpenDocument(), this::onProgramSelected);
+ 
+     @Override
+     protected void onCreate(Bundle savedInstanceState) {
+         AppUtils.setActivityTheme(this);
+         super.onCreate(savedInstanceState);
++        if (savedInstanceState != null) importContainerId = savedInstanceState.getInt("importContainerId");
+         setContentView(R.layout.main_activity);
+ 
+         drawerLayout = findViewById(R.id.DrawerLayout);
+@@ -79,7 +92,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
+             actionBar.setHomeAsUpIndicator(R.drawable.icon_action_bar_menu);
+             onNavigationItemSelected(navigationView.getMenu().findItem(menuItemId));
+             navigationView.setCheckedItem(menuItemId);
+-            if (!requestAppPermissions()) RootFSInstaller.installIfNeeded(this);
++            RootFSInstaller.installIfNeeded(this);
+ 
+             int containerId = intent.getIntExtra("container_id", 0);
+             String startPath = intent.getStringExtra("start_path");
+@@ -89,6 +102,12 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
+         }
+     }
+ 
++    @Override
++    protected void onSaveInstanceState(@NonNull Bundle outState) {
++        super.onSaveInstanceState(outState);
++        outState.putInt("importContainerId", importContainerId);
++    }
++
+     @Override
+     protected void attachBaseContext(Context newBase) {
+         super.attachBaseContext(LocaleHelper.setSystemLocale(newBase));
+@@ -98,10 +117,8 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
+     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+         if (requestCode == PERMISSION_WRITE_EXTERNAL_STORAGE_REQUEST_CODE) {
+-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+-                RootFSInstaller.installIfNeeded(this);
+-            }
+-            else finish();
++            boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
++            AppUtils.showToast(this, granted ? R.string.winblow_downloads_ready : R.string.winblow_downloads_denied);
+         }
+     }
+ 
+@@ -144,13 +161,69 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
+         this.openFileCallback = openFileCallback;
+     }
+ 
+-    private boolean requestAppPermissions() {
++    public void requestDownloadsAccess() {
+         if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED &&
+-            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) return false;
++            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
++            AppUtils.showToast(this, R.string.winblow_downloads_ready);
++            return;
++        }
+ 
+         String[] permissions = new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.READ_EXTERNAL_STORAGE};
+         ActivityCompat.requestPermissions(this, permissions, PERMISSION_WRITE_EXTERNAL_STORAGE_REQUEST_CODE);
+-        return true;
++    }
++
++    public void pickWindowsProgram(Container container) {
++        if (preloaderDialog.isShowing()) return;
++        if (XServerDisplayActivity.isDesktopOpen()) {
++            AppUtils.showToast(this, R.string.winblow_desktop_in_use);
++            return;
++        }
++        importContainerId = container.id;
++        openProgram.launch(new String[]{"*/*"});
++    }
++
++    private void onProgramSelected(Uri uri) {
++        int containerId = importContainerId;
++        importContainerId = 0;
++        if (uri == null || containerId == 0) return;
++
++        Container container = new ContainerManager(this).getContainerById(containerId);
++        if (container == null) {
++            AppUtils.showToast(this, R.string.winblow_desktop_missing);
++            return;
++        }
++
++        preloaderDialog.show(R.string.winblow_importing);
++        new Thread(() -> {
++            try {
++                File imported = WindowsProgramImporter.copy(getApplicationContext(), container, uri);
++                runOnUiThread(() -> {
++                    preloaderDialog.close();
++                    if (!isFinishing() && !isDestroyed()) launchWindowsProgram(container, imported);
++                });
++            }
++            catch (IOException | RuntimeException e) {
++                Log.w("Winblow", "Unable to import the selected program", e);
++                int message = e instanceof WindowsProgramImporter.InvalidProgramException
++                    ? R.string.winblow_invalid_program : R.string.winblow_import_failed;
++                runOnUiThread(() -> {
++                    preloaderDialog.close();
++                    if (!isFinishing() && !isDestroyed()) AppUtils.showToast(this, message);
++                });
++            }
++        }, "winblow-program-import").start();
++    }
++
++    public void launchWindowsProgram(Container container, File file) {
++        if (XServerDisplayActivity.isDesktopOpen()) {
++            AppUtils.showToast(this, R.string.winblow_desktop_in_use);
++            return;
++        }
++        Intent intent = new Intent(this, XServerDisplayActivity.class);
++        intent.putExtra("container_id", container.id);
++        intent.putExtra("exec_path", file.getPath());
++        intent.putExtra(XServerDisplayActivity.EXTRA_KEEP_DESKTOP, true);
++        startActivity(intent);
+     }
+ 
+     @Override
+@@ -216,4 +289,4 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
+         drawerLayout.closeDrawer(GravityCompat.START);
+         currentFragment = fragment;
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/java/com/winlator/XServerDisplayActivity.java b/app/src/main/java/com/winlator/XServerDisplayActivity.java
+index 667f1b3..94451eb 100644
+--- a/app/src/main/java/com/winlator/XServerDisplayActivity.java
++++ b/app/src/main/java/com/winlator/XServerDisplayActivity.java
+@@ -10,6 +10,7 @@ import android.content.SharedPreferences;
+ import android.content.res.Configuration;
+ import android.os.Bundle;
+ import android.view.KeyEvent;
++import android.util.Log;
+ import android.view.Menu;
+ import android.view.MenuItem;
+ import android.view.MotionEvent;
+@@ -62,6 +63,7 @@ import com.winlator.core.WineRegistryEditor;
+ import com.winlator.core.WineStartMenuCreator;
+ import com.winlator.core.WineThemeManager;
+ import com.winlator.core.WineUtils;
++import com.winlator.core.WindowsProgramFile;
+ import com.winlator.inputcontrols.ControlsProfile;
+ import com.winlator.inputcontrols.ExternalController;
+ import com.winlator.inputcontrols.InputControlsManager;
+@@ -103,6 +105,14 @@ import java.util.Iterator;
+ import java.util.concurrent.Executors;
+ 
+ public class XServerDisplayActivity extends AppCompatActivity implements NavigationView.OnNavigationItemSelectedListener {
++    public static final String EXTRA_KEEP_DESKTOP = "winblow_keep_desktop";
++    private static boolean desktopOpen;
++    private final PreloaderDialog preloaderDialog = new PreloaderDialog(this);
++
++    public static boolean isDesktopOpen() {
++        return desktopOpen;
++    }
++
+     private XServerView xServerView;
+     private InputControlsView inputControlsView;
+     private TouchpadView touchpadView;
+@@ -141,12 +151,12 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+     public void onCreate(Bundle savedInstanceState) {
+         AppUtils.setActivityTheme(this);
+         super.onCreate(savedInstanceState);
++        desktopOpen = true;
+         AppUtils.hideSystemUI(this);
+         AppUtils.keepScreenOn(this);
+         setContentView(R.layout.xserver_display_activity);
+         ForegroundService.startSession(this);
+ 
+-        final PreloaderDialog preloaderDialog = new PreloaderDialog(this);
+         preferences = PreferenceManager.getDefaultSharedPreferences(this);
+         boolean useAndroidClipboardOnWine = preferences.getBoolean("use_android_clipboard_on_wine", false);
+         clipboardManager = useAndroidClipboardOnWine ? (ClipboardManager)getSystemService(CLIPBOARD_SERVICE) : null;
+@@ -168,6 +178,11 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+         if (!isGenerateWineprefix()) {
+             ContainerManager containerManager = new ContainerManager(this);
+             container = containerManager.getContainerById(getIntent().getIntExtra("container_id", 0));
++            if (container == null) {
++                AppUtils.showToast(this, R.string.winblow_desktop_missing);
++                finish();
++                return;
++            }
+             containerManager.activateContainer(container);
+ 
+             boolean wineprefixNeedsUpdate = container.getExtra("wineprefixNeedsUpdate").equals("t");
+@@ -235,7 +250,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+         inputControlsManager = new InputControlsManager(this);
+         xServer = new XServer(this, screenInfo);
+         xServer.setWinHandler(winHandler);
+-        final boolean[] flags = {false, shortcut != null || getIntent().hasExtra("exec_path")};
++        final boolean[] flags = {false, hideDesktop()};
+         xServer.windowManager.addOnWindowModificationListener(new WindowManager.OnWindowModificationListener() {
+             @Override
+             public void onUpdateWindowContent(Window window) {
+@@ -268,12 +283,18 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+         setupUI();
+ 
+         Executors.newSingleThreadExecutor().execute(() -> {
+-            if (!isGenerateWineprefix()) {
+-                setupWineSystemFiles();
+-                extractGraphicsDriverFiles();
+-                changeWineAudioDriver();
++            try {
++                if (!isGenerateWineprefix()) {
++                    setupWineSystemFiles();
++                    extractGraphicsDriverFiles();
++                    changeWineAudioDriver();
++                }
++                setupXEnvironment();
++            }
++            catch (RuntimeException e) {
++                Log.e("Winblow", "Desktop startup failed", e);
++                runOnUiThread(this::reportLaunchFailure);
+             }
+-            setupXEnvironment();
+         });
+     }
+ 
+@@ -297,7 +318,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+     public void onWindowFocusChanged(boolean hasFocus) {
+         super.onWindowFocusChanged(hasFocus);
+ 
+-        if (hasFocus) {
++        if (hasFocus && inputControlsView != null) {
+             if (capturePointerOnExternalMouse) {
+                 // Captured events are delivered to the focused view.
+                 View captureView = inputControlsView.getVisibility() == View.VISIBLE ? inputControlsView : touchpadView;
+@@ -341,6 +362,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+ 
+     @Override
+     protected void onDestroy() {
++        desktopOpen = false;
++        preloaderDialog.close();
+         winHandler.stop();
+         if (environment != null) environment.stopEnvironmentComponents();
+         ForegroundService.stopSession(this);
+@@ -432,7 +455,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+         if (environment != null) environment.stopEnvironmentComponents();
+ 
+         Intent intent = getIntent();
+-        if (intent.hasExtra("exec_path")) {
++        if (intent.hasExtra("exec_path") && !intent.getBooleanExtra(EXTRA_KEEP_DESKTOP, false)) {
+             AppUtils.RestartApplicationOptions options = new AppUtils.RestartApplicationOptions();
+             options.containerId = container.id;
+             options.startPath = FileUtils.getDirname(intent.getStringExtra("exec_path"));
+@@ -442,6 +465,17 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+         ForegroundService.stopSession(this);
+     }
+ 
++    private boolean hideDesktop() {
++        return shortcut != null || (getIntent().hasExtra("exec_path") &&
++            !getIntent().getBooleanExtra(EXTRA_KEEP_DESKTOP, false));
++    }
++
++    private void reportLaunchFailure() {
++        if (isFinishing() || isDestroyed()) return;
++        AppUtils.showToast(this, R.string.winblow_guest_failed);
++        finish();
++    }
++
+     private void setupWineSystemFiles() {
+         String appVersion = String.valueOf(AppUtils.getVersionCode(this));
+         String rfsVersion = String.valueOf(rootFS.getVersion());
+@@ -510,7 +544,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+         if (container != null) {
+             if (container.getHUDMode() == FrameRating.Mode.FULL.ordinal()) envVars.put("X11_WND_GPU_INFO", "1");
+ 
+-            String desktopName = shortcut != null || getIntent().hasExtra("exec_path") ? "nogui" : "shell";
++            String desktopName = hideDesktop() ? "nogui" : "shell";
+             String guestExecutable = "wine explorer /desktop="+desktopName+","+xServer.screenInfo+" "+getWineStartCommand();
+             guestProgramLauncherComponent.setGuestExecutable(guestExecutable);
+ 
+@@ -556,7 +590,11 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+         }
+ 
+         guestProgramLauncherComponent.setEnvVars(envVars);
+-        guestProgramLauncherComponent.setTerminationCallback((status) -> exit());
++        guestProgramLauncherComponent.setTerminationCallback(status -> runOnUiThread(() -> {
++            if (isFinishing() || isDestroyed()) return;
++            if (status != 0) reportLaunchFailure();
++            else exit();
++        }));
+         environment.addComponent(guestProgramLauncherComponent);
+ 
+         if (isGenerateWineprefix()) {
+@@ -986,7 +1024,13 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+                 execArgs = filename.substring(spaceIndex+1)+execArgs;
+                 filename = filename.substring(0, spaceIndex);
+             }
+-            cmdArgs = "/dir "+StringUtils.escapeDOSPath(execDir)+" \""+filename+"\""+execArgs;
++            String directoryArgument = "/dir " + StringUtils.escapeDOSPath(execDir) + " ";
++            if (WindowsProgramFile.isMsi(filename)) {
++                cmdArgs = directoryArgument + "\"C:\\windows\\system32\\msiexec.exe\" /i \"" + filename + "\"" + execArgs;
++            }
++            else {
++                cmdArgs = directoryArgument + "\"" + filename + "\"" + execArgs;
++            }
+         }
+ 
+         if (cmdArgs.isEmpty()) cmdArgs = "/dir C:\\windows \"wfm.exe\"";
+@@ -1139,4 +1183,4 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+         }
+         else return false;
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/java/com/winlator/container/Container.java b/app/src/main/java/com/winlator/container/Container.java
+index 2086786..003ed94 100644
+--- a/app/src/main/java/com/winlator/container/Container.java
++++ b/app/src/main/java/com/winlator/container/Container.java
+@@ -21,8 +21,8 @@ public class Container {
+     public static final String DEFAULT_SCREEN_SIZE = "1280x720";
+     public static final String DEFAULT_AUDIO_DRIVER = AudioDrivers.ALSA;
+     public static final String DEFAULT_DXWRAPPER = DXWrappers.DXVK;
+-    public static final String DEFAULT_WINCOMPONENTS = "direct3d=1,directsound=1,directmusic=1,directshow=0,directplay=0,xaudio=1,vcrun2005=0,vcrun2010=1,wmdecoder=1";
+     public static final String FALLBACK_WINCOMPONENTS = "direct3d=0,directsound=0,directmusic=0,directshow=0,directplay=0,xaudio=0,vcrun2005=0,vcrun2010=0,wmdecoder=0";
++    public static final String DEFAULT_WINCOMPONENTS = FALLBACK_WINCOMPONENTS;
+     public static final String DEFAULT_DRIVES = "D:"+AppUtils.DIRECTORY_DOWNLOADS +"E:"+AppUtils.INTERNAL_STORAGE;
+     public static final byte STARTUP_SELECTION_NORMAL = 0;
+     public static final byte STARTUP_SELECTION_ESSENTIAL = 1;
+diff --git a/app/src/main/java/com/winlator/container/ContainerManager.java b/app/src/main/java/com/winlator/container/ContainerManager.java
+index 1708187..f68fa2c 100644
+--- a/app/src/main/java/com/winlator/container/ContainerManager.java
++++ b/app/src/main/java/com/winlator/container/ContainerManager.java
+@@ -8,6 +8,8 @@ import com.winlator.core.Callback;
+ import com.winlator.core.FileUtils;
+ import com.winlator.core.TarCompressorUtils;
+ import com.winlator.core.WineInfo;
++import com.winlator.core.WineUtils;
++import com.winlator.win32.WinVersions;
+ import com.winlator.xenvironment.RootFS;
+ 
+ import org.json.JSONArray;
+@@ -115,6 +117,13 @@ public class ContainerManager {
+                 return null;
+             }
+ 
++            String windowsVersion = data.optString("windowsVersion");
++            for (WinVersions.WinVersion version : WinVersions.getWinVersions()) {
++                if (version.version.equals(windowsVersion)) {
++                    WineUtils.setWinVersion(container, version);
++                    break;
++                }
++            }
+             container.saveData();
+             maxContainerId++;
+             containers.add(container);
+diff --git a/app/src/main/java/com/winlator/contentdialog/AboutDialog.java b/app/src/main/java/com/winlator/contentdialog/AboutDialog.java
+index 84f2567..b5c88a4 100644
+--- a/app/src/main/java/com/winlator/contentdialog/AboutDialog.java
++++ b/app/src/main/java/com/winlator/contentdialog/AboutDialog.java
+@@ -19,12 +19,13 @@ public class AboutDialog extends ContentDialog {
+             final PackageInfo pInfo = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+ 
+             TextView tvWebpage = findViewById(R.id.TVWebpage);
+-            tvWebpage.setText(Html.fromHtml("<a href=\"https://www.winlator.org\">winlator.org</a>", Html.FROM_HTML_MODE_LEGACY));
++            tvWebpage.setText(Html.fromHtml("<a href=\"https://github.com/nawazthecoder/Winblow\">Winblow source</a>", Html.FROM_HTML_MODE_LEGACY));
+             tvWebpage.setMovementMethod(LinkMovementMethod.getInstance());
+ 
+             ((TextView)findViewById(R.id.TVAppVersion)).setText(context.getString(R.string.version)+" "+pInfo.versionName);
+ 
+             String creditsAndThirdPartyAppsHTML = String.join("<br />",
++                "Based on <a href=\"https://github.com/brunodev85/winlator-app\">Winlator by BrunoSX and contributors</a>",
+                 "GLIBC Patches by (<a href=\"https://github.com/termux-pacman/glibc-packages\">Termux Pacman</a>)",
+                 "Wine (<a href=\"https://www.winehq.org\">winehq.org</a>)",
+                 "Box86/Box64 by <a href=\"https://github.com/ptitSeb\">ptitseb</a>",
+diff --git a/app/src/main/java/com/winlator/core/AppUtils.java b/app/src/main/java/com/winlator/core/AppUtils.java
+index cac686e..adf5ea7 100644
+--- a/app/src/main/java/com/winlator/core/AppUtils.java
++++ b/app/src/main/java/com/winlator/core/AppUtils.java
+@@ -44,7 +44,7 @@ import java.util.TimerTask;
+ 
+ public abstract class AppUtils {
+     public static final String DIRECTORY_DOWNLOADS = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getPath();
+-    public static final String INTERNAL_STORAGE = "/data/data/com.winlator/storage";
++    public static final String INTERNAL_STORAGE = "/data/data/com.winblowx/storage";
+     private static WeakReference<Toast> globalToastReference = null;
+ 
+     public static class RestartApplicationOptions {
+diff --git a/app/src/main/java/com/winlator/core/FileUtils.java b/app/src/main/java/com/winlator/core/FileUtils.java
+index b503fc0..8700402 100644
+--- a/app/src/main/java/com/winlator/core/FileUtils.java
++++ b/app/src/main/java/com/winlator/core/FileUtils.java
+@@ -410,7 +410,7 @@ public abstract class FileUtils {
+         Intent intent;
+         if (path.startsWith("file://")) {
+             File file = new File(Uri.decode(path.replace("file://", "")));
+-            intent = new Intent(Intent.ACTION_VIEW, FileProvider.getUriForFile(activity, "com.winlator.FileProvider", file));
++            intent = new Intent(Intent.ACTION_VIEW, FileProvider.getUriForFile(activity, activity.getPackageName()+".FileProvider", file));
+             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+         }
+         else intent = new Intent(Intent.ACTION_VIEW, Uri.parse(path));
+diff --git a/app/src/main/java/com/winlator/core/WindowsProgramFile.java b/app/src/main/java/com/winlator/core/WindowsProgramFile.java
+new file mode 100644
+index 0000000..3f424e5
+--- /dev/null
++++ b/app/src/main/java/com/winlator/core/WindowsProgramFile.java
+@@ -0,0 +1,51 @@
++package com.winlator.core;
++
++import java.io.File;
++import java.io.IOException;
++import java.io.RandomAccessFile;
++import java.util.Locale;
++
++public final class WindowsProgramFile {
++    private static final long COMPOUND_DOCUMENT_MAGIC = 0xd0cf11e0a1b11ae1L;
++
++    private WindowsProgramFile() {}
++
++    public static String safeFilename(String displayName) {
++        if (displayName == null) return null;
++        String lowerName = displayName.toLowerCase(Locale.ROOT);
++        if (!lowerName.endsWith(".exe") && !lowerName.endsWith(".msi")) return null;
++
++        String stem = displayName.substring(0, displayName.length() - 4)
++            .replaceAll("[\\p{Cntrl}<>:\"/\\\\|?*]", "_")
++            .trim();
++        if (stem.codePointCount(0, stem.length()) > 60) stem = stem.substring(0, stem.offsetByCodePoints(0, 60));
++        stem = stem.replaceAll("[. ]+$", "");
++        if (stem.isEmpty() || stem.matches("(?i)^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\..*)?$")) {
++            stem = "program_" + stem;
++        }
++        return stem + lowerName.substring(lowerName.length() - 4);
++    }
++
++    public static boolean isMsi(String filename) {
++        return filename.toLowerCase(Locale.ROOT).endsWith(".msi");
++    }
++
++    public static boolean matchesFormat(File file) throws IOException {
++        try (RandomAccessFile data = new RandomAccessFile(file, "r")) {
++            if (isMsi(file.getName())) {
++                return data.length() >= 512 && data.readLong() == COMPOUND_DOCUMENT_MAGIC;
++            }
++            if (data.length() < 64 || data.readUnsignedShort() != 0x4d5a) return false;
++            data.seek(0x3c);
++            long peOffset = Integer.toUnsignedLong(Integer.reverseBytes(data.readInt()));
++            if (peOffset < 64 || peOffset > data.length() - 24) return false;
++            data.seek(peOffset);
++            if (data.readInt() != 0x50450000) return false;
++            int machine = Short.toUnsignedInt(Short.reverseBytes(data.readShort()));
++            if (machine != 0x014c && machine != 0x8664) return false;
++            data.seek(peOffset + 22);
++            int flags = Short.toUnsignedInt(Short.reverseBytes(data.readShort()));
++            return (flags & 0x0002) != 0 && (flags & 0x2000) == 0;
++        }
++    }
++}
+diff --git a/app/src/main/java/com/winlator/core/WindowsProgramImporter.java b/app/src/main/java/com/winlator/core/WindowsProgramImporter.java
+new file mode 100644
+index 0000000..26d44d5
+--- /dev/null
++++ b/app/src/main/java/com/winlator/core/WindowsProgramImporter.java
+@@ -0,0 +1,59 @@
++package com.winlator.core;
++
++import android.content.ContentResolver;
++import android.content.Context;
++import android.database.Cursor;
++import android.net.Uri;
++import android.provider.OpenableColumns;
++
++import com.winlator.container.Container;
++
++import java.io.File;
++import java.io.IOException;
++import java.io.InputStream;
++import java.nio.file.Files;
++
++public final class WindowsProgramImporter {
++    public static final class InvalidProgramException extends IOException {
++        InvalidProgramException() {
++            super("Expected a Windows x86/x64 EXE or MSI");
++        }
++    }
++
++    private WindowsProgramImporter() {}
++
++    public static File copy(Context context, Container container, Uri uri) throws IOException {
++        ContentResolver resolver = context.getContentResolver();
++        String name;
++        try (Cursor cursor = resolver.query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
++            if (cursor == null || !cursor.moveToFirst()) throw new IOException("The document is unavailable");
++            name = WindowsProgramFile.safeFilename(cursor.getString(0));
++        }
++        if (name == null) throw new InvalidProgramException();
++
++        File drive = new File(container.getRootDir().getCanonicalFile(), ".wine/drive_c");
++        File imports = new File(drive, "WinblowImports");
++        if (!drive.isDirectory() || !imports.equals(imports.getCanonicalFile())) {
++            throw new IOException("Invalid destination drive");
++        }
++        Files.createDirectories(imports.toPath());
++        File folder = Files.createTempDirectory(imports.toPath(), "app-").toFile();
++        File file = new File(folder, name);
++        boolean complete = false;
++        try {
++            try (InputStream input = resolver.openInputStream(uri)) {
++                if (input == null) throw new IOException("The document is unavailable");
++                Files.copy(input, file.toPath());
++            }
++            if (!WindowsProgramFile.matchesFormat(file)) throw new InvalidProgramException();
++            complete = true;
++            return file;
++        }
++        finally {
++            if (!complete) {
++                file.delete();
++                folder.delete();
++            }
++        }
++    }
++}
+diff --git a/app/src/main/java/com/winlator/core/WineUtils.java b/app/src/main/java/com/winlator/core/WineUtils.java
+index 131d341..7384425 100644
+--- a/app/src/main/java/com/winlator/core/WineUtils.java
++++ b/app/src/main/java/com/winlator/core/WineUtils.java
+@@ -301,7 +301,15 @@ public abstract class WineUtils {
+     }
+ 
+     public static void setWinVersion(Container container, int winVersionIdx) {
+-        WinVersions.WinVersion winVersion = WinVersions.getWinVersions()[winVersionIdx];
++        setWinVersion(container, WinVersions.getWinVersions()[winVersionIdx]);
++    }
++
++    public static void setWinVersion(Container container, WinVersions.WinVersion winVersion) {
++        File userRegFile = new File(container.getRootDir(), ".wine/user.reg");
++        try (WineRegistryEditor registryEditor = new WineRegistryEditor(userRegFile)) {
++            registryEditor.setStringValue("Software\\Wine", "Version", winVersion.version);
++        }
++
+         String currentBuild = String.valueOf(winVersion.buildNumber);
+         String currentVersion = winVersion.currentVersion != null ? winVersion.currentVersion : winVersion.majorVersion+"."+winVersion.minorVersion;
+ 
+diff --git a/app/src/main/java/com/winlator/services/ForegroundService.java b/app/src/main/java/com/winlator/services/ForegroundService.java
+index 0940581..850ddab 100644
+--- a/app/src/main/java/com/winlator/services/ForegroundService.java
++++ b/app/src/main/java/com/winlator/services/ForegroundService.java
+@@ -279,7 +279,7 @@ public class ForegroundService extends Service {
+ 
+         Notification n = notificationUtils.createForegroundNotification(
+                 getNotificationContent(),
+-                "Winlator",
++                "Winblow",
+                 XServerDisplayActivity.class, // Service class for the 'Exit' action
+                 null, // Exit action here, not used because might cause issues
+                 targetActivity // Activity class for the 'Open' (notification tap) action
+@@ -371,7 +371,7 @@ public class ForegroundService extends Service {
+     @NonNull
+     private static String getNotificationContent() {
+         ForegroundService svc = instance;
+-        if (svc == null) return "Winlator is running in the background";
++        if (svc == null) return "Winblow is running in the background";
+ 
+         if (sessionActive.get()) {
+             return isSessionInBackground && (isDeviceLocked() || !isInPictureInPictureMode())
+diff --git a/app/src/main/java/com/winlator/services/NotificationUtils.java b/app/src/main/java/com/winlator/services/NotificationUtils.java
+index c3f422c..761d381 100644
+--- a/app/src/main/java/com/winlator/services/NotificationUtils.java
++++ b/app/src/main/java/com/winlator/services/NotificationUtils.java
+@@ -13,7 +13,7 @@ import java.lang.ref.WeakReference;
+ 
+ public class NotificationUtils {
+     private static final String CHANNEL_ID = "winlator_foreground_service";
+-    private static final String CHANNEL_NAME = "Winlator Foreground Service";
++    private static final String CHANNEL_NAME = "Winblow Foreground Service";
+ 
+     private final Context context;
+     private final NotificationManager notificationManager;
+@@ -163,7 +163,7 @@ public class NotificationUtils {
+                 CHANNEL_ID,
+                 CHANNEL_NAME,
+                 NotificationManager.IMPORTANCE_LOW,
+-                "Allows to display Winlator foreground notifications"
++                "Displays Winblow foreground notifications"
+         );
+     }
+ 
+diff --git a/app/src/main/java/com/winlator/xenvironment/components/GuestProgramLauncherComponent.java b/app/src/main/java/com/winlator/xenvironment/components/GuestProgramLauncherComponent.java
+index 84c4702..4c55d0b 100644
+--- a/app/src/main/java/com/winlator/xenvironment/components/GuestProgramLauncherComponent.java
++++ b/app/src/main/java/com/winlator/xenvironment/components/GuestProgramLauncherComponent.java
+@@ -33,12 +33,15 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
+ 
+     @Override
+     public void start() {
++        boolean failed;
+         synchronized (lock) {
+             stop();
+             extractBox64File();
+             copyDefaultBox64RCFile();
+             pid = execGuestProgram();
++            failed = pid == -1;
+         }
++        if (failed && terminationCallback != null) terminationCallback.call(-1);
+     }
+ 
+     @Override
+@@ -202,4 +205,4 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
+             }
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/res/drawable/winblow_icon.xml b/app/src/main/res/drawable/winblow_icon.xml
+new file mode 100644
+index 0000000..30e56ce
+--- /dev/null
++++ b/app/src/main/res/drawable/winblow_icon.xml
+@@ -0,0 +1,11 @@
++<?xml version="1.0" encoding="utf-8"?>
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="108dp"
++    android:height="108dp"
++    android:viewportWidth="108"
++    android:viewportHeight="108">
++    <path android:fillColor="#122036" android:pathData="M22,8H86Q100,8 100,22V86Q100,100 86,100H22Q8,100 8,86V22Q8,8 22,8Z" />
++    <path android:fillColor="#234669" android:pathData="M25,28H83Q87,28 87,32V71Q87,75 83,75H25Q21,75 21,71V32Q21,28 25,28Z" />
++    <path android:fillColor="#D8EAFD" android:pathData="M30,39H37L42,60L50,39H56L64,60L70,39H78L68,67H60L53,49L46,67H38Z" />
++    <path android:fillColor="#76B9FC" android:pathData="M43,80H65V85H43Z" />
++</vector>
+diff --git a/app/src/main/res/layout/about_dialog.xml b/app/src/main/res/layout/about_dialog.xml
+index 4fd3694..4fc711a 100644
+--- a/app/src/main/res/layout/about_dialog.xml
++++ b/app/src/main/res/layout/about_dialog.xml
+@@ -47,7 +47,7 @@
+             <ImageView
+                 android:layout_width="70dp"
+                 android:layout_height="70dp"
+-                android:src="@mipmap/ic_launcher" />
++                android:src="@drawable/winblow_icon" />
+         </LinearLayout>
+ 
+         <View style="@style/HorizontalLine" />
+@@ -63,4 +63,4 @@
+             android:layout_width="wrap_content"
+             android:layout_height="wrap_content" />
+     </LinearLayout>
+-</LinearLayout>
+\ No newline at end of file
++</LinearLayout>
+diff --git a/app/src/main/res/layout/containers_fragment.xml b/app/src/main/res/layout/containers_fragment.xml
+index a954448..0d43e65 100644
+--- a/app/src/main/res/layout/containers_fragment.xml
++++ b/app/src/main/res/layout/containers_fragment.xml
+@@ -11,12 +11,45 @@
+         android:scrollbars="vertical"
+         app:layoutManager="LinearLayoutManager" />
+ 
+-    <TextView
+-        android:id="@+id/TVEmptyText"
++    <LinearLayout
++        android:id="@+id/LLWinblowEmpty"
+         android:layout_width="match_parent"
+         android:layout_height="match_parent"
++        android:orientation="vertical"
++        android:padding="28dp"
+         android:gravity="center"
+-        android:text="@string/no_items_to_display"
+-        android:textSize="24sp"
+-        android:visibility="gone" />
++        android:visibility="gone">
++
++        <ImageView
++            android:layout_width="84dp"
++            android:layout_height="84dp"
++            android:importantForAccessibility="no"
++            android:src="@drawable/winblow_icon" />
++
++        <TextView
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="12dp"
++            android:gravity="center"
++            android:text="@string/winblow_desktop_title"
++            android:textColor="?attr/colorPrimaryText"
++            android:textSize="22sp"
++            android:textStyle="bold" />
++
++        <TextView
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="8dp"
++            android:gravity="center"
++            android:text="@string/winblow_desktop_intro"
++            android:textColor="?attr/colorSecondaryText"
++            android:textSize="15sp" />
++
++        <Button
++            android:id="@+id/BTWinblowCreate"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="16dp"
++            android:text="@string/winblow_create_desktop" />
++    </LinearLayout>
+ </FrameLayout>
+diff --git a/app/src/main/res/menu/container_popup_menu.xml b/app/src/main/res/menu/container_popup_menu.xml
+index e5269d8..3d5f079 100644
+--- a/app/src/main/res/menu/container_popup_menu.xml
++++ b/app/src/main/res/menu/container_popup_menu.xml
+@@ -1,8 +1,11 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <menu xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:id="@+id/menu_item_winblow_import" android:title="@string/winblow_import_program" />
++    <item android:id="@+id/menu_item_winblow_notepad" android:title="@string/winblow_try_notepad" />
+     <item android:id="@+id/menu_item_file_manager" android:title="@string/file_manager" android:icon="@drawable/icon_popup_menu_file_manager" android:iconTint="?attr/colorAccent" />
+     <item android:id="@+id/menu_item_edit" android:title="@string/edit" android:icon="@drawable/icon_popup_menu_edit" android:iconTint="?attr/colorAccent" />
+     <item android:id="@+id/menu_item_duplicate" android:title="@string/duplicate" android:icon="@drawable/icon_popup_menu_duplicate" android:iconTint="?attr/colorAccent" />
+     <item android:id="@+id/menu_item_remove" android:title="@string/remove" android:icon="@drawable/icon_popup_menu_remove" android:iconTint="?attr/colorAccent" />
+     <item android:id="@+id/menu_item_info" android:title="@string/storage_info" android:icon="@drawable/icon_popup_menu_info" android:iconTint="?attr/colorAccent" />
++    <item android:id="@+id/menu_item_winblow_downloads" android:title="@string/winblow_share_downloads" />
+ </menu>
+diff --git a/app/src/main/res/values-pt/strings.xml b/app/src/main/res/values-pt/strings.xml
+index e2d342c..eba1021 100644
+--- a/app/src/main/res/values-pt/strings.xml
++++ b/app/src/main/res/values-pt/strings.xml
+@@ -1,6 +1,5 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name">Winlator</string>
+     <string name="run">Executar</string>
+     <string name="edit">Editar</string>
+     <string name="remove">Remover</string>
+@@ -299,4 +298,4 @@
+     <string name="enable_background_wakelock">Ativar wakelock quando o dispositivo está bloqueado</string>
+     <string name="save_mem_on_run_from_steam">Economize memória ao executar a partir do Steam</string>
+     <string name="present_mode">Modo de Apresentação</string>
+-</resources>
+\ No newline at end of file
++</resources>
+diff --git a/app/src/main/res/values-ru/strings.xml b/app/src/main/res/values-ru/strings.xml
+index 3475814..009aef0 100644
+--- a/app/src/main/res/values-ru/strings.xml
++++ b/app/src/main/res/values-ru/strings.xml
+@@ -1,6 +1,5 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name">Winlator</string>
+     <string name="run">Запустить</string>
+     <string name="edit">Редактировать</string>
+     <string name="remove">Удалить</string>
+@@ -299,4 +298,4 @@
+     <string name="enable_background_wakelock">Включить wakelock, когда устройство заблокировано</string>
+     <string name="save_mem_on_run_from_steam">Экономия памяти при запуске из Steam</string>
+     <string name="present_mode">Режим презентации</string>
+-</resources>
+\ No newline at end of file
++</resources>
+diff --git a/app/src/main/res/values/arrays.xml b/app/src/main/res/values/arrays.xml
+index 89b4b3c..78bbfb6 100644
+--- a/app/src/main/res/values/arrays.xml
++++ b/app/src/main/res/values/arrays.xml
+@@ -74,7 +74,6 @@
+     </string-array>
+     <string-array name="wincomponent_entries">
+         <item>@string/builtin_wine</item>
+-        <item>@string/native_windows</item>
+     </string-array>
+     <string-array name="dinput_mapper_type_entries">
+         <item>Standard</item>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index e943712..be0deb3 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -1,12 +1,12 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name">Winlator</string>
++    <string name="app_name" translatable="false">Winblow</string>
+     <string name="run">Run</string>
+     <string name="edit">Edit</string>
+     <string name="remove">Remove</string>
+     <string name="add">Add</string>
+     <string name="shortcuts">Shortcuts</string>
+-    <string name="containers">Containers</string>
++    <string name="containers">Desktops</string>
+     <string name="input_controls">Input Controls</string>
+     <string name="no_items_to_display">No items to display</string>
+     <string name="new_container">New Container</string>
+@@ -352,10 +352,10 @@
+     <string name="ddraw_wrapper" translatable="false">DDraw Wrapper</string>
+     <string name="renderer">Renderer</string>
+     <string name="default_no_override">Default (No override)</string>
+-    <string name="fgs_notification_channel_desc">Keeps Winlator running in the background so a wine session is not interrupted by Android\'s background process management.</string>
++    <string name="fgs_notification_channel_desc">Keeps a Windows program running while Winblow is in the background.</string>
+     <string name="fgs_notification_content_container_background">A container session is running in the background</string>
+     <string name="fgs_notification_content_container_foreground">There is a container session running</string>
+-    <string name="fgs_notification_content_else">Winlator is running in the background</string>
++    <string name="fgs_notification_content_else">Winblow is running in the background</string>
+     <string name="save_mem_on_run_from_steam">Save memory on run from Steam</string>
+     <string name="present_mode">Present Mode</string>
+-</resources>
+\ No newline at end of file
++</resources>
+diff --git a/app/src/main/res/values/winblow_strings.xml b/app/src/main/res/values/winblow_strings.xml
+new file mode 100644
+index 0000000..87c6905
+--- /dev/null
++++ b/app/src/main/res/values/winblow_strings.xml
+@@ -0,0 +1,25 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="winblow_desktop_title">Your Windows desktop</string>
++    <string name="winblow_desktop_intro">Create a desktop to run compatible Windows apps and games locally.</string>
++    <string name="winblow_create_desktop">Create desktop</string>
++    <string name="winblow_manual_setup">Manual setup</string>
++    <string name="winblow_windows10">Windows 10</string>
++    <string name="winblow_windows11">Windows 11</string>
++    <string-array name="winblow_desktop_profiles">
++        <item>Windows 10 compatibility</item>
++        <item>Windows 11 compatibility</item>
++    </string-array>
++    <string name="winblow_create_failed">Could not create the desktop. Check your free storage and try again.</string>
++    <string name="winblow_import_program">Import and run EXE or MSI</string>
++    <string name="winblow_try_notepad">Try Notepad</string>
++    <string name="winblow_share_downloads">Allow access to Downloads</string>
++    <string name="winblow_importing">Copying Windows program…</string>
++    <string name="winblow_import_failed">Could not copy the program. Check that the file is available and you have free storage.</string>
++    <string name="winblow_invalid_program">Choose a Windows x86 or x64 EXE or MSI file.</string>
++    <string name="winblow_desktop_missing">This desktop is unavailable.</string>
++    <string name="winblow_desktop_in_use">Exit the open desktop before launching another program.</string>
++    <string name="winblow_downloads_ready">Open the D: drive in your desktop to use Downloads.</string>
++    <string name="winblow_downloads_denied">Downloads access is off. You can still import individual programs.</string>
++    <string name="winblow_guest_failed">Wine could not start this desktop. Check the renderer settings or enable logs in Settings.</string>
++</resources>
+diff --git a/gradle/wrapper/gradle-wrapper.properties b/gradle/wrapper/gradle-wrapper.properties
+index b3fec1f..63fa66d 100644
+--- a/gradle/wrapper/gradle-wrapper.properties
++++ b/gradle/wrapper/gradle-wrapper.properties
+@@ -1,6 +1,7 @@
+ #Fri Mar 14 10:22:05 BRT 2025
+ distributionBase=GRADLE_USER_HOME
+ distributionPath=wrapper/dists
+-distributionUrl=https\://services.gradle.org/distributions/gradle-8.14.5-bin.zip
++distributionUrl=https\://downloads.gradle.org/distributions/gradle-8.14.5-bin.zip
++distributionSha256Sum=6f74b601422d6d6fc4e1f9a1ab6522f642c2fdcbc15ae33ebd30ba3d7198e854
+ zipStoreBase=GRADLE_USER_HOME
+ zipStorePath=wrapper/dists
