@@ -13,15 +13,29 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
       - name: Install Android build tools
         run: |
-          sdkmanager --licenses <<< "$(printf 'y\n%.0s' {1..30})" >/dev/null
-          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;34.0.0' 'ndk;24.0.8215888' 'cmake;3.22.1'
+          sdk="$RUNNER_TEMP/winblow-sdk"
+          tools_zip="$RUNNER_TEMP/android-command-line-tools.zip"
+          curl --fail --location --retry 3 --silent --show-error \
+            https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip \
+            --output "$tools_zip"
+          printf '%s  %s\n' 5fdcc763663eefb86a5b8879697aa6088b041e70 "$tools_zip" | sha1sum -c
+          mkdir -p "$sdk/cmdline-tools"
+          unzip -q "$tools_zip" -d "$sdk/cmdline-tools"
+          mv "$sdk/cmdline-tools/cmdline-tools" "$sdk/cmdline-tools/19.0"
+          sdkmanager="$sdk/cmdline-tools/19.0/bin/sdkmanager"
+          "$sdkmanager" --sdk_root="$sdk" --licenses <<< "$(printf 'y\n%.0s' {1..30})" >/dev/null
+          "$sdkmanager" --sdk_root="$sdk" \
+            'platform-tools' 'platforms;android-35' 'build-tools;34.0.0' 'ndk;24.0.8215888' 'cmake;3.22.1'
+          printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$sdk" "$sdk" >> "$GITHUB_ENV"
       - name: Build and verify APK
         run: ./scripts/build.sh
       - name: Test Windows program validation
