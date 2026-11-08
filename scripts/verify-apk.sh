@@ -65,7 +65,7 @@ with ZipFile(sys.argv[1]) as apk:
             header = files.extractfile(f"./usr/lib/libvulkan_{name}.so").read(20)
             manifest = files.extractfile(f"./usr/share/vulkan/icd.d/{name}_icd.aarch64.json")
             library_path = json.load(manifest)["ICD"]["library_path"]
-            if header[:6] != b"\\x7fELF\\x02\\x01" or struct.unpack_from("<H", header, 18)[0] != 183:
+            if header[:6] != b"\x7fELF\x02\x01" or struct.unpack_from("<H", header, 18)[0] != 183:
                 raise SystemExit(f"Wrong ARM64 ELF architecture in {driver} {version}")
             if library_path != f"/data/data/com.winblowx/files/rootfs/lib/libvulkan_{name}.so":
                 raise SystemExit(f"Invalid Winblow driver path in {driver} {version}")
