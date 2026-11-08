@@ -1044,10 +1044,18 @@ index 8f9b7e5..e4e6f8f 100644
          return 0;
      }
 diff --git a/app/src/main/java/com/winlator/xserver/extensions/DRI3Extension.java b/app/src/main/java/com/winlator/xserver/extensions/DRI3Extension.java
-index 30de101..5a1b78c 100644
+index 30de101..72d683c 100644
 --- a/app/src/main/java/com/winlator/xserver/extensions/DRI3Extension.java
 +++ b/app/src/main/java/com/winlator/xserver/extensions/DRI3Extension.java
-@@ -114,6 +114,7 @@ public class DRI3Extension extends Extension {
+@@ -21,6 +21,7 @@ import com.winlator.xserver.errors.BadIdChoice;
+ import com.winlator.xserver.errors.BadImplementation;
+ import com.winlator.xserver.errors.BadPixmap;
+ import com.winlator.xserver.errors.BadWindow;
++import com.winlator.xserver.errors.BadMatch;
+ import com.winlator.xserver.errors.XRequestError;
+ 
+ import java.io.IOException;
+@@ -114,6 +115,7 @@ public class DRI3Extension extends Extension {
          else content = window.getContent();
  
          GPUImage texture = GPUImage.createOrObtain(xServer, content, false, true);
