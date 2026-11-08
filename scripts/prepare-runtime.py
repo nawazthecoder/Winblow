@@ -74,8 +74,13 @@ def main():
         raise RuntimeError("The guest paths must have identical byte lengths")
 
     # Winblow uses Wine's built-in DLLs. Installers can supply their own runtimes.
-    for archive in (args.assets / "wincomponents").glob("*.tzst"):
+    # Snapshot directory entries before mutation; some filesystems otherwise skip entries.
+    optional_archives = sorted((args.assets / "wincomponents").glob("*.tzst"))
+    for archive in optional_archives:
         archive.unlink()
+    if any((args.assets / "wincomponents").glob("*.tzst")):
+        raise RuntimeError("Could not remove optional Windows runtime archives")
+    print(f"Removed {len(optional_archives)} optional Windows runtime archives.")
 
     for archive in sorted(args.assets.rglob("*.tzst")):
         relocate_archive(archive)
