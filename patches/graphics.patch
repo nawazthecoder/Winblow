@@ -1,0 +1,1808 @@
+diff --git a/app/build.gradle b/app/build.gradle
+index 64a6d25..6c3f43e 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -8,8 +8,8 @@ android {
+         applicationId 'com.winblowx'
+         minSdkVersion 26
+         targetSdkVersion 28
+-        versionCode 1
+-        versionName '0.1.0'
++        versionCode 34
++        versionName '0.2.0'
+     }
+ 
+     buildTypes {
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index 58985d5..2aa3a6b 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -1,7 +1,7 @@
+ <?xml version="1.0" encoding="utf-8" standalone="no"?>
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+     <uses-feature
+-        android:glEsVersion="0x00020000"
++        android:glEsVersion="0x00030000"
+         android:required="true" />
+ 
+     <uses-permission android:name="android.permission.INTERNET"/>
+diff --git a/app/src/main/cpp/winlator/src/gpu_helper.c b/app/src/main/cpp/winlator/src/gpu_helper.c
+index bc58f36..32551eb 100644
+--- a/app/src/main/cpp/winlator/src/gpu_helper.c
++++ b/app/src/main/cpp/winlator/src/gpu_helper.c
+@@ -14,6 +14,12 @@
+ 
+ EGLContext globalEGLContext = EGL_NO_CONTEXT;
+ 
++typedef struct {
++    EGLDisplay display;
++    EGLContext context;
++    EGLSurface surface;
++} OffscreenContext;
++
+ JNIEXPORT jobjectArray JNICALL
+ Java_com_winlator_core_GPUHelper_vkGetDeviceExtensions(JNIEnv *env, jclass obj) {
+     VkInstanceCreateInfo createInfo = {0};
+@@ -30,6 +36,7 @@ Java_com_winlator_core_GPUHelper_vkGetDeviceExtensions(JNIEnv *env, jclass obj)
+     PFN_vkDestroyInstance vkDestroyInstance = dlsym(libvulkan, "vkDestroyInstance");
+     PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices = dlsym(libvulkan, "vkEnumeratePhysicalDevices");
+     PFN_vkEnumerateDeviceExtensionProperties vkEnumerateDeviceExtensionProperties = dlsym(libvulkan, "vkEnumerateDeviceExtensionProperties");
++    if (!vkCreateInstance || !vkDestroyInstance || !vkEnumeratePhysicalDevices || !vkEnumerateDeviceExtensionProperties) goto done;
+ 
+     result = vkCreateInstance(&createInfo, NULL, &instance);
+     if (result != VK_SUCCESS) goto done;
+@@ -37,13 +44,14 @@ Java_com_winlator_core_GPUHelper_vkGetDeviceExtensions(JNIEnv *env, jclass obj)
+     uint32_t deviceCount = 1;
+     VkPhysicalDevice physicalDevice;
+     result = vkEnumeratePhysicalDevices(instance, &deviceCount, &physicalDevice);
+-    if (result != VK_SUCCESS && result != VK_INCOMPLETE) goto done;
++    if ((result != VK_SUCCESS && result != VK_INCOMPLETE) || deviceCount == 0) goto done;
+ 
+     uint32_t propertyCount = 0;
+     result = vkEnumerateDeviceExtensionProperties(physicalDevice, NULL, &propertyCount, NULL);
+     if (result != VK_SUCCESS || propertyCount == 0) goto done;
+ 
+     properties = calloc(propertyCount, sizeof(VkExtensionProperties));
++    if (!properties) goto done;
+     result = vkEnumerateDeviceExtensionProperties(physicalDevice, NULL, &propertyCount, properties);
+     if (result != VK_SUCCESS) goto done;
+ 
+@@ -65,7 +73,7 @@ done:
+ JNIEXPORT jint JNICALL
+ Java_com_winlator_core_GPUHelper_vkGetApiVersion() {
+     int version = 0;
+-    char* content = fileGetContents(APP_CACHE_DIR "/.vk-api-version", NULL, NULL);
++    char* content = fileGetContents(APP_CACHE_DIR "/.vk-api-version-v2", NULL, NULL);
+     if (content) {
+         version = strtol(content, NULL, 10);
+         MEMFREE(content);
+@@ -83,6 +91,8 @@ Java_com_winlator_core_GPUHelper_vkGetApiVersion() {
+     PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices = dlsym(libvulkan, "vkEnumeratePhysicalDevices");
+     PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties = dlsym(libvulkan, "vkGetPhysicalDeviceProperties");
+     PFN_vkGetPhysicalDeviceFeatures vkGetPhysicalDeviceFeatures = dlsym(libvulkan, "vkGetPhysicalDeviceFeatures");
++    if (!vkCreateInstance || !vkDestroyInstance || !vkEnumeratePhysicalDevices ||
++        !vkGetPhysicalDeviceProperties || !vkGetPhysicalDeviceFeatures) goto done;
+ 
+     VkInstanceCreateInfo createInfo = {0};
+     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+@@ -93,7 +103,7 @@ Java_com_winlator_core_GPUHelper_vkGetApiVersion() {
+     uint32_t deviceCount = 1;
+     VkPhysicalDevice physicalDevice;
+     result = vkEnumeratePhysicalDevices(instance, &deviceCount, &physicalDevice);
+-    if (result != VK_SUCCESS && result != VK_INCOMPLETE) goto done;
++    if ((result != VK_SUCCESS && result != VK_INCOMPLETE) || deviceCount == 0) goto done;
+ 
+     VkPhysicalDeviceProperties properties = {0};
+     vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+@@ -108,7 +118,7 @@ Java_com_winlator_core_GPUHelper_vkGetApiVersion() {
+             VkBool32 srcValue = *(VkBool32*)(((char*)&features) + offset);
+             VkBool32 dstValue = *(VkBool32*)(((char*)&requiredFeatures) + offset);
+ 
+-            if (srcValue != dstValue) {
++            if (dstValue == VK_TRUE && srcValue != VK_TRUE) {
+                 version = VK_MAKE_VERSION(1, 2, 0);
+                 break;
+             }
+@@ -117,7 +127,7 @@ Java_com_winlator_core_GPUHelper_vkGetApiVersion() {
+ 
+     char value[32] = {0};
+     sprintf(value, "%d", version);
+-    filePutContents(APP_CACHE_DIR "/.vk-api-version", value, strlen(value));
++    filePutContents(APP_CACHE_DIR "/.vk-api-version-v2", value, strlen(value));
+ 
+ done:
+     if (instance) vkDestroyInstance(instance, NULL);
+@@ -135,6 +145,7 @@ Java_com_winlator_core_GPUHelper_createOffscreenEGLContext(JNIEnv *env, jclass o
+                                                            jboolean sharedContext) {
+     static const EGLint confAttribList[] = {
+         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
++        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+         EGL_NONE,
+     };
+     static const EGLint ctxAttribList[] = {
+@@ -153,19 +164,38 @@ Java_com_winlator_core_GPUHelper_createOffscreenEGLContext(JNIEnv *env, jclass o
+     int numConfigs;
+     EGLConfig eglConfig;
+     success = eglChooseConfig(eglDisplay, confAttribList, &eglConfig, 1, &numConfigs);
+-    if (!success || numConfigs != 1) return 0;
+-
+-    EGLContext eglContext = eglCreateContext(eglDisplay, eglConfig, sharedContext ? globalEGLContext : NULL, ctxAttribList);
++    if (!success || numConfigs < 1) return 0;
++
++    if (sharedContext && globalEGLContext == EGL_NO_CONTEXT) return 0;
++    OffscreenContext *offscreen = calloc(1, sizeof(*offscreen));
++    if (!offscreen) return 0;
++    offscreen->display = eglDisplay;
++    offscreen->surface = EGL_NO_SURFACE;
++    offscreen->context = eglCreateContext(eglDisplay, eglConfig,
++        sharedContext ? globalEGLContext : EGL_NO_CONTEXT, ctxAttribList);
++    if (offscreen->context == EGL_NO_CONTEXT) goto failed;
++    if (!eglMakeCurrent(eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, offscreen->context)) {
++        static const EGLint pbufferAttributes[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
++        offscreen->surface = eglCreatePbufferSurface(eglDisplay, eglConfig, pbufferAttributes);
++        if (offscreen->surface == EGL_NO_SURFACE ||
++                !eglMakeCurrent(eglDisplay, offscreen->surface, offscreen->surface, offscreen->context)) goto failed;
++    }
++    return (jlong)offscreen;
+ 
+-    eglMakeCurrent(eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, eglContext);
+-    return (jlong)eglContext;
++failed:
++    if (offscreen->surface != EGL_NO_SURFACE) eglDestroySurface(eglDisplay, offscreen->surface);
++    if (offscreen->context != EGL_NO_CONTEXT) eglDestroyContext(eglDisplay, offscreen->context);
++    free(offscreen);
++    return 0;
+ }
+ 
+ JNIEXPORT void JNICALL
+ Java_com_winlator_core_GPUHelper_destroyOffscreenEGLContext(JNIEnv *env, jclass obj,
+                                                             jlong contextPtr) {
+     if (contextPtr == 0) return;
+-    EGLDisplay eglDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+-    eglMakeCurrent(eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+-    eglDestroyContext(eglDisplay, (EGLContext)contextPtr);
++    OffscreenContext *offscreen = (OffscreenContext*)contextPtr;
++    eglMakeCurrent(offscreen->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
++    if (offscreen->surface != EGL_NO_SURFACE) eglDestroySurface(offscreen->display, offscreen->surface);
++    eglDestroyContext(offscreen->display, offscreen->context);
++    free(offscreen);
+ }
+\ No newline at end of file
+diff --git a/app/src/main/java/com/winlator/ContainerDetailFragment.java b/app/src/main/java/com/winlator/ContainerDetailFragment.java
+index 8b8cd46..36c1dbb 100644
+--- a/app/src/main/java/com/winlator/ContainerDetailFragment.java
++++ b/app/src/main/java/com/winlator/ContainerDetailFragment.java
+@@ -36,6 +36,8 @@ import com.winlator.container.Container;
+ import com.winlator.container.ContainerManager;
+ import com.winlator.container.Drive;
+ import com.winlator.container.GraphicsDrivers;
++import com.winlator.container.GraphicsDevice;
++import com.winlator.container.GraphicsProfile;
+ import com.winlator.contentdialog.AddEnvVarDialog;
+ import com.winlator.contentdialog.AudioDriverConfigDialog;
+ import com.winlator.contentdialog.ContentDialog;
+@@ -134,14 +136,16 @@ public class ContainerDetailFragment extends Fragment {
+         final Spinner sWineVersion = view.findViewById(R.id.SWineVersion);
+         if (wineInfos.size() > 1) loadWineVersionSpinner(view, sWineVersion, wineInfos);
+ 
+-        loadScreenSizeSpinner(view, isEditMode() ? container.getScreenSize() : Container.DEFAULT_SCREEN_SIZE);
++        GraphicsProfile.Settings automatic = isEditMode() ? null :
++            GraphicsDevice.detect(context).resolve(GraphicsProfile.AUTO, GraphicsProfile.RECOMMENDED_FRAME_CAP);
++        loadScreenSizeSpinner(view, isEditMode() ? container.getScreenSize() : automatic.resolution);
+ 
+         final String oldGraphicsDriverConfig = isEditMode() ? container.getGraphicsDriverConfig() : "";
+-        String selectedGraphicsDriver = isEditMode() ? container.getGraphicsDriver() : GraphicsDrivers.getDefaultDriver(context);
++        String selectedGraphicsDriver = isEditMode() ? container.getGraphicsDriver() : automatic.drivers;
+         GraphicsDriverPicker graphicsDriverPicker = new GraphicsDriverPicker(view.findViewById(R.id.LLGraphicsDriver), selectedGraphicsDriver, oldGraphicsDriverConfig);
+ 
+-        String oldDXWrapperConfig = isEditMode() ? container.getDXWrapperConfig() : "";
+-        String selectedDXWrapper = isEditMode() ? container.getDXWrapper() : Container.DEFAULT_DXWRAPPER;
++        String oldDXWrapperConfig = isEditMode() ? container.getDXWrapperConfig() : automatic.wrapperConfig;
++        String selectedDXWrapper = isEditMode() ? container.getDXWrapper() : automatic.wrapper;
+         DXWrapperPicker dxwrapperPicker = new DXWrapperPicker(view.findViewById(R.id.LLDXWrapper), graphicsDriverPicker, selectedDXWrapper, oldDXWrapperConfig);
+ 
+         view.findViewById(R.id.BTHelpDXWrapper).setOnClickListener((v) -> AppUtils.showHelpBox(context, v, R.string.dxwrapper_help_content));
+diff --git a/app/src/main/java/com/winlator/ContainersFragment.java b/app/src/main/java/com/winlator/ContainersFragment.java
+index 71b4039..7fe85bc 100644
+--- a/app/src/main/java/com/winlator/ContainersFragment.java
++++ b/app/src/main/java/com/winlator/ContainersFragment.java
+@@ -1,7 +1,6 @@
+ package com.winlator;
+ 
+ import android.app.Activity;
+-import android.app.ActivityManager;
+ import android.content.Context;
+ import android.content.Intent;
+ import android.os.Build;
+@@ -30,14 +29,15 @@ import androidx.recyclerview.widget.RecyclerView;
+ 
+ import com.winlator.container.Container;
+ import com.winlator.container.ContainerManager;
+-import com.winlator.container.DXWrappers;
+-import com.winlator.container.GraphicsDrivers;
++import com.winlator.container.GraphicsDevice;
++import com.winlator.container.GraphicsProfile;
+ import com.winlator.box64.Box64Preset;
+ import com.winlator.contentdialog.ContentDialog;
++import com.winlator.contentdialog.GraphicsProfileDialog;
+ import com.winlator.contentdialog.StorageInfoDialog;
+ import com.winlator.core.PreloaderDialog;
+ import com.winlator.core.AppUtils;
+-import com.winlator.core.GPUHelper;
++import com.winlator.core.Callback;
+ import com.winlator.xenvironment.RootFSInstaller;
+ import com.winlator.xenvironment.RootFS;
+ 
+@@ -127,25 +127,38 @@ public class ContainersFragment extends Fragment {
+     }
+ 
+     private void createDesktop(boolean windows10) {
+-        Context context = requireContext();
+-        ActivityManager activityManager = (ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
+-        ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
+-        activityManager.getMemoryInfo(memory);
+-        boolean lowMemory = activityManager.isLowRamDevice() || memory.totalMem < 5L * 1024 * 1024 * 1024;
+-        boolean adreno = GPUHelper.getAdrenoModelId(context) > 0;
++        detectGraphicsDevice(device -> createDesktop(windows10, device));
++    }
++
++    private void detectGraphicsDevice(Callback<GraphicsDevice> callback) {
++        Activity activity = requireActivity();
++        if (preloaderDialog.isShowing()) return;
++        preloaderDialog.show(R.string.winblow_detecting_gpu);
++        new Thread(() -> {
++            GraphicsDevice device = GraphicsDevice.detect(activity.getApplicationContext());
++            activity.runOnUiThread(() -> {
++                preloaderDialog.close();
++                if (isAdded() && getView() != null && !activity.isFinishing()) callback.call(device);
++            });
++        }, "winblow-graphics-device").start();
++    }
+ 
++    private void createDesktop(boolean windows10, GraphicsDevice device) {
++        GraphicsProfile.Settings preset = device.resolve(GraphicsProfile.AUTO, GraphicsProfile.RECOMMENDED_FRAME_CAP);
+         JSONObject settings = new JSONObject();
+         try {
+             String profile = getString(windows10 ? R.string.winblow_windows10 : R.string.winblow_windows11);
+             settings.put("name", profile + " · " + manager.getNextContainerId());
+             settings.put("windowsVersion", windows10 ? "win10" : "win11");
+-            settings.put("screenSize", lowMemory ? "960x540" : Container.DEFAULT_SCREEN_SIZE);
+-            settings.put("graphicsDriver", adreno ? GraphicsDrivers.getDefaultDriver(context) : GraphicsDrivers.VORTEK + "," + GraphicsDrivers.VIRGL);
+-            settings.put("dxwrapper", adreno ? DXWrappers.DXVK : DXWrappers.WINED3D);
++            settings.put("screenSize", preset.resolution);
++            settings.put("graphicsDriver", preset.drivers);
++            settings.put("dxwrapper", preset.wrapper);
++            settings.put("dxwrapperConfig", preset.wrapperConfig);
++            if (device.lowMemory) settings.put("envVars", Container.DEFAULT_ENV_VARS.replace("512MB", "128MB"));
+             settings.put("box64Preset", Box64Preset.CONSERVATIVE);
+         }
+         catch (JSONException e) {
+-            AppUtils.showToast(context, R.string.winblow_create_failed);
++            AppUtils.showToast(requireContext(), R.string.winblow_create_failed);
+             return;
+         }
+ 
+@@ -190,7 +203,7 @@ public class ContainersFragment extends Fragment {
+             final Container item = data.get(position);
+             holder.imageView.setImageResource(R.drawable.icon_container);
+             holder.title.setText(item.getName());
+-            holder.runButton.setOnClickListener((view) -> runContainer(item));
++            holder.runButton.setOnClickListener((view) -> runContainer(item, false));
+             holder.menuButton.setOnClickListener((view) -> showListItemMenu(view, item));
+         }
+ 
+@@ -213,6 +226,16 @@ public class ContainersFragment extends Fragment {
+                     case R.id.menu_item_winblow_notepad:
+                         activity.launchWindowsProgram(container, new File(container.getRootDir(), ".wine/drive_c/windows/notepad.exe"));
+                         break;
++                    case R.id.menu_item_winblow_graphics:
++                        if (XServerDisplayActivity.isDesktopOpen()) {
++                            AppUtils.showToast(activity, R.string.winblow_desktop_in_use);
++                            break;
++                        }
++                        detectGraphicsDevice(device -> new GraphicsProfileDialog(activity, container, device).show());
++                        break;
++                    case R.id.menu_item_winblow_safe_graphics:
++                        runContainer(container, true);
++                        break;
+                     case R.id.menu_item_file_manager:
+                         activity.showFragment(new ContainerFileManagerFragment(container.id));
+                         break;
+@@ -249,10 +272,15 @@ public class ContainersFragment extends Fragment {
+             listItemMenu.show();
+         }
+ 
+-        private void runContainer(Container container) {
++        private void runContainer(Container container, boolean safeGraphics) {
+             Activity activity = getActivity();
++            if (XServerDisplayActivity.isDesktopOpen()) {
++                AppUtils.showToast(activity, R.string.winblow_desktop_in_use);
++                return;
++            }
+             Intent intent = new Intent(activity, XServerDisplayActivity.class);
+             intent.putExtra("container_id", container.id);
++            intent.putExtra(XServerDisplayActivity.EXTRA_SAFE_GRAPHICS, safeGraphics);
+             activity.startActivity(intent);
+         }
+     }
+diff --git a/app/src/main/java/com/winlator/MainActivity.java b/app/src/main/java/com/winlator/MainActivity.java
+index 93cbfa6..33e34b4 100644
+--- a/app/src/main/java/com/winlator/MainActivity.java
++++ b/app/src/main/java/com/winlator/MainActivity.java
+@@ -37,6 +37,7 @@ import com.winlator.core.LocaleHelper;
+ import com.winlator.core.PreloaderDialog;
+ import com.winlator.core.WindowsProgramImporter;
+ import com.winlator.xenvironment.RootFSInstaller;
++import com.winlator.xenvironment.RootFS;
+ 
+ import java.io.File;
+ import java.io.IOException;
+@@ -99,6 +100,14 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
+             if (containerId > 0 && startPath != null) {
+                 showFragment(new ContainerFileManagerFragment(containerId, startPath));
+             }
++            int safeDesktopId = intent.getIntExtra("safe_desktop_id", 0);
++            if (safeDesktopId > 0 && RootFS.find(this).isValid()) {
++                intent.removeExtra("safe_desktop_id");
++                Intent safeDesktop = new Intent(this, XServerDisplayActivity.class);
++                safeDesktop.putExtra("container_id", safeDesktopId);
++                safeDesktop.putExtra(XServerDisplayActivity.EXTRA_SAFE_GRAPHICS, true);
++                startActivity(safeDesktop);
++            }
+         }
+     }
+ 
+diff --git a/app/src/main/java/com/winlator/XServerDisplayActivity.java b/app/src/main/java/com/winlator/XServerDisplayActivity.java
+index 94451eb..5aaac54 100644
+--- a/app/src/main/java/com/winlator/XServerDisplayActivity.java
++++ b/app/src/main/java/com/winlator/XServerDisplayActivity.java
+@@ -9,6 +9,8 @@ import android.content.Intent;
+ import android.content.SharedPreferences;
+ import android.content.res.Configuration;
+ import android.os.Bundle;
++import android.os.Handler;
++import android.os.Looper;
+ import android.view.KeyEvent;
+ import android.util.Log;
+ import android.view.Menu;
+@@ -23,6 +25,7 @@ import android.widget.Spinner;
+ import androidx.annotation.NonNull;
+ import androidx.annotation.Nullable;
+ import androidx.appcompat.app.AppCompatActivity;
++import androidx.appcompat.app.AlertDialog;
+ import androidx.core.view.GravityCompat;
+ import androidx.drawerlayout.widget.DrawerLayout;
+ import androidx.preference.PreferenceManager;
+@@ -34,6 +37,9 @@ import com.winlator.container.Container;
+ import com.winlator.container.ContainerManager;
+ import com.winlator.container.DXWrappers;
+ import com.winlator.container.GraphicsDrivers;
++import com.winlator.container.GraphicsDevice;
++import com.winlator.container.GraphicsProfile;
++import com.winlator.box64.Box64Preset;
+ import com.winlator.container.Shortcut;
+ import com.winlator.contentdialog.ActiveWindowsDialog;
+ import com.winlator.contentdialog.AudioDriverConfigDialog;
+@@ -49,6 +55,7 @@ import com.winlator.core.AppUtils;
+ import com.winlator.core.DefaultVersion;
+ import com.winlator.core.EnvVars;
+ import com.winlator.core.FileUtils;
++import com.winlator.core.GPUHelper;
+ import com.winlator.core.GeneralComponents;
+ import com.winlator.core.KeyValueSet;
+ import com.winlator.core.LocaleHelper;
+@@ -101,13 +108,22 @@ import org.json.JSONObject;
+ 
+ import java.io.File;
+ import java.util.ArrayList;
++import java.util.Arrays;
+ import java.util.Iterator;
++import java.util.List;
++import java.util.Locale;
+ import java.util.concurrent.Executors;
+ 
+ public class XServerDisplayActivity extends AppCompatActivity implements NavigationView.OnNavigationItemSelectedListener {
+     public static final String EXTRA_KEEP_DESKTOP = "winblow_keep_desktop";
++    public static final String EXTRA_SAFE_GRAPHICS = "winblow_safe_graphics";
+     private static boolean desktopOpen;
+     private final PreloaderDialog preloaderDialog = new PreloaderDialog(this);
++    private final Handler startupHandler = new Handler(Looper.getMainLooper());
++    private final Runnable startupTimeout = () -> showStartupRecovery(true);
++    private volatile boolean desktopReady;
++    private boolean safeGraphics;
++    private AlertDialog recoveryDialog;
+ 
+     public static boolean isDesktopOpen() {
+         return desktopOpen;
+@@ -239,6 +255,15 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+                 if (intent.hasExtra("exec_path")) win32AppWorkarounds.applyStartupWorkarounds(FileUtils.getName(intent.getStringExtra("exec_path")));
+             }
+ 
++            safeGraphics = getIntent().getBooleanExtra(EXTRA_SAFE_GRAPHICS, false);
++            if (safeGraphics) {
++                GraphicsProfile.Settings settings = GraphicsProfile.SAFE.resolve(0, 0, true, 0);
++                graphicsDriver = settings.drivers;
++                graphicsDriverConfig = "";
++                dxwrapper = settings.wrapper;
++                dxwrapperConfig = settings.wrapperConfig;
++                screenInfo = resolveScreenInfo(settings.resolution);
++            }
+             this.graphicsDriver = GraphicsDrivers.parseIdentifiers(graphicsDriver);
+             this.graphicsDriverConfig = GraphicsDrivers.parseConfigs(graphicsDriver, graphicsDriverConfig);
+             this.dxwrapper = DXWrappers.parseIdentifier(dxwrapper);
+@@ -246,6 +271,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+         }
+ 
+         preloaderDialog.show(R.string.starting_up);
++        if (container != null) startupHandler.postDelayed(startupTimeout, 60_000);
+ 
+         inputControlsManager = new InputControlsManager(this);
+         xServer = new XServer(this, screenInfo);
+@@ -261,8 +287,13 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+             public void onMapWindow(Window window) {
+                 if (!flags[0] && window.isRenderable() && !window.getClassName().isEmpty()) {
+                     xServerView.getRenderer().setCursorVisible(true);
+-                    preloaderDialog.closeOnUiThread();
+                     flags[0] = true;
++                    desktopReady = true;
++                    runOnUiThread(() -> {
++                        startupHandler.removeCallbacks(startupTimeout);
++                        preloaderDialog.close();
++                        if (recoveryDialog != null) recoveryDialog.dismiss();
++                    });
+                 }
+ 
+                 if (flags[1] && window.attributes.isViewable() && window.isDesktopWindow()) {
+@@ -285,6 +316,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+         Executors.newSingleThreadExecutor().execute(() -> {
+             try {
+                 if (!isGenerateWineprefix()) {
++                    normalizeGraphicsSettings();
+                     setupWineSystemFiles();
+                     extractGraphicsDriverFiles();
+                     changeWineAudioDriver();
+@@ -363,6 +395,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+     @Override
+     protected void onDestroy() {
+         desktopOpen = false;
++        startupHandler.removeCallbacks(startupTimeout);
++        if (recoveryDialog != null) recoveryDialog.dismiss();
+         preloaderDialog.close();
+         winHandler.stop();
+         if (environment != null) environment.stopEnvironmentComponents();
+@@ -471,9 +505,97 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+     }
+ 
+     private void reportLaunchFailure() {
+-        if (isFinishing() || isDestroyed()) return;
+-        AppUtils.showToast(this, R.string.winblow_guest_failed);
+-        finish();
++        showStartupRecovery(false);
++    }
++
++    private void showStartupRecovery(boolean slow) {
++        if (isFinishing() || isDestroyed() || (slow && desktopReady)) return;
++        startupHandler.removeCallbacks(startupTimeout);
++        preloaderDialog.close();
++        if (recoveryDialog != null) recoveryDialog.dismiss();
++        if (!slow && (safeGraphics || desktopReady || container == null)) {
++            AppUtils.showToast(this, R.string.winblow_guest_failed);
++            finish();
++            return;
++        }
++        AlertDialog.Builder prompt = new AlertDialog.Builder(this)
++            .setTitle(R.string.starting_up)
++            .setMessage(slow ? R.string.winblow_startup_slow : R.string.winblow_startup_failed)
++            .setCancelable(false)
++            .setNegativeButton(android.R.string.cancel, (dialog, button) -> {
++                if (slow) exit();
++                else finish();
++            });
++        if (!safeGraphics) {
++            prompt.setPositiveButton(R.string.winblow_safe_graphics, (dialog, button) -> {
++                AppUtils.RestartApplicationOptions options = new AppUtils.RestartApplicationOptions();
++                options.safeDesktopId = container.id;
++                ForegroundService.stopSession(this);
++                AppUtils.restartApplication(this, options);
++            });
++        }
++        if (slow) {
++            prompt.setNeutralButton(R.string.winblow_wait_for_desktop, (dialog, button) -> {
++                if (!desktopReady) {
++                    preloaderDialog.show(R.string.starting_up);
++                    startupHandler.postDelayed(startupTimeout, 60_000);
++                }
++            });
++        }
++        recoveryDialog = prompt.show();
++    }
++
++    private boolean hasVulkanDriver() {
++        return GraphicsDrivers.isVulkanDriver(graphicsDriver[0]);
++    }
++
++    private void normalizeGraphicsSettings() {
++        int vulkanVersion = GraphicsDevice.vulkanVersion(this);
++        if (GraphicsDrivers.TURNIP.equals(graphicsDriver[0])) {
++            String renderer = GPUHelper.glGetRenderer(this).toLowerCase(Locale.ROOT);
++            if (!renderer.isEmpty() && !renderer.contains("adreno")) {
++                graphicsDriver[0] = vulkanVersion > 0 ? GraphicsDrivers.VORTEK : GraphicsDrivers.NONE;
++                graphicsDriverConfig[0] = new KeyValueSet();
++            }
++        }
++        if (GraphicsDrivers.VORTEK.equals(graphicsDriver[0]) && vulkanVersion == 0) {
++            graphicsDriver[0] = GraphicsDrivers.NONE;
++        }
++        if (!hasVulkanDriver()) {
++            if (GraphicsDrivers.ZINK.equals(graphicsDriver[1])) graphicsDriver[1] = GraphicsDrivers.VIRGL;
++            if (DXWrappers.DXVK.equals(dxwrapper)) {
++                dxwrapper = DXWrappers.WINED3D;
++                dxwrapperConfig[0] = new KeyValueSet();
++            }
++            if ("vulkan".equals(dxwrapperConfig[0].get("renderer"))) dxwrapperConfig[0].put("renderer", "gl");
++            if (DXWrappers.D7VK.equals(dxwrapperConfig[0].get("ddrawWrapper"))) {
++                dxwrapperConfig[0].put("ddrawWrapper", DXWrappers.WINED3D);
++            }
++        }
++        if (DXWrappers.WINED3D.equals(dxwrapper) && GraphicsDrivers.NONE.equals(graphicsDriver[1]) &&
++                !"vulkan".equals(dxwrapperConfig[0].get("renderer"))) {
++            dxwrapperConfig[0].put("renderer", "gdi");
++        }
++    }
++
++    private boolean supportsModernWrappers() {
++        if (GraphicsDrivers.TURNIP.equals(graphicsDriver[0])) {
++            String turnip = graphicsDriverConfig[0].get("version", DefaultVersion.TURNIP);
++            return GPUHelper.vkMakeVersion(turnip) >= GPUHelper.vkMakeVersion(26, 0, 3);
++        }
++        if (GraphicsDevice.vulkanVersion(this) < GPUHelper.VK_API_VERSION_1_3) return false;
++        List<String> extensions = Arrays.asList(GPUHelper.vkGetDeviceExtensions());
++        return extensions.containsAll(Arrays.asList("VK_KHR_maintenance5", "VK_KHR_maintenance6",
++            "VK_KHR_load_store_op_none", "VK_EXT_depth_clip_enable", "VK_EXT_robustness2",
++            "VK_EXT_transform_feedback"));
++    }
++
++    private boolean supportsVulkan13() {
++        if (GraphicsDrivers.TURNIP.equals(graphicsDriver[0])) {
++            String turnip = graphicsDriverConfig[0].get("version", DefaultVersion.TURNIP);
++            return !turnip.equals("24.1.0") && !turnip.equals("25.0.0");
++        }
++        return hasVulkanDriver() && GraphicsDevice.vulkanVersion(this) >= GPUHelper.VK_API_VERSION_1_3;
+     }
+ 
+     private void setupWineSystemFiles() {
+@@ -548,11 +670,17 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+             String guestExecutable = "wine explorer /desktop="+desktopName+","+xServer.screenInfo+" "+getWineStartCommand();
+             guestProgramLauncherComponent.setGuestExecutable(guestExecutable);
+ 
+-            envVars.putAll(container.getEnvVars());
+-            if (shortcut != null) envVars.putAll(shortcut.getExtra("envVars"));
++            if (!safeGraphics) {
++                envVars.putAll(container.getEnvVars());
++                if (shortcut != null) envVars.putAll(shortcut.getExtra("envVars"));
++            }
++            if (GraphicsDrivers.TURNIP.equals(graphicsDriver[0])) {
++                TurnipConfigDialog.setEnvVars(this, graphicsDriverConfig[0], envVars);
++            }
+             if (!envVars.has("WINEESYNC")) envVars.put("WINEESYNC", "1");
+ 
+-            guestProgramLauncherComponent.setBox64Preset(shortcut != null ? shortcut.getExtra("box64Preset", container.getBox64Preset()) : container.getBox64Preset());
++            guestProgramLauncherComponent.setBox64Preset(safeGraphics ? Box64Preset.STABILITY :
++                (shortcut != null ? shortcut.getExtra("box64Preset", container.getBox64Preset()) : container.getBox64Preset()));
+         }
+ 
+         environment = new XEnvironment(this, rootFS);
+@@ -763,67 +891,69 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+ 
+     private void extractGraphicsDriverFiles() {
+         envVars.put("vblank_mode", "0");
+-
+-        String cacheId = "";
+-        if (graphicsDriver[0].equals(GraphicsDrivers.TURNIP)) {
+-            cacheId += graphicsDriver[0]+"-"+graphicsDriverConfig[0].get("version", DefaultVersion.TURNIP);
+-        }
+-        else cacheId += graphicsDriver[0]+"-"+DefaultVersion.valueOf(graphicsDriver[0]);
+-        cacheId += "-"+graphicsDriver[1]+"-"+DefaultVersion.valueOf(graphicsDriver[1]);
+-
+-        String currentGraphicsDriver = preferences.getString("current_graphics_driver", "");
+-        boolean changed = !cacheId.equals(currentGraphicsDriver);
++        String vulkan = graphicsDriver[0];
++        String openGL = graphicsDriver[1];
++        String vulkanVersion = graphicsDriverConfig[0].get("version", DefaultVersion.TURNIP);
++        String cacheId = "graphics2-"+vulkan+"-"+
++            (GraphicsDrivers.TURNIP.equals(vulkan) ? vulkanVersion : DefaultVersion.valueOf(vulkan))+
++            "-"+openGL+"-"+DefaultVersion.valueOf(openGL);
+         File rootDir = rootFS.getRootDir();
+         File libDir = rootFS.getLibDir();
+-
+-        if (changed) {
+-            FileUtils.delete(new File(libDir, "libvulkan_freedreno.so"));
+-            FileUtils.delete(new File(libDir, "libvulkan_vortek.so"));
+-            FileUtils.delete(new File(libDir, "libGL.so.1.7.0"));
+-
+-            File vulkanICDDir = new File(rootDir, "/usr/share/vulkan/icd.d");
+-            FileUtils.delete(vulkanICDDir);
+-            vulkanICDDir.mkdirs();
+-
+-            preferences.edit().putString("current_graphics_driver", cacheId).apply();
+-        }
+-
+-        if (graphicsDriver[0].equals(GraphicsDrivers.TURNIP)) {
+-            TurnipConfigDialog.setEnvVars(this, graphicsDriverConfig[0], envVars);
+-
+-            if (changed) {
+-                String version = graphicsDriverConfig[0].get("version", DefaultVersion.TURNIP);
+-                GeneralComponents.extractFile(GeneralComponents.Type.TURNIP, this, version, DefaultVersion.TURNIP);
++        File turnipLibrary = new File(libDir, "libvulkan_freedreno.so");
++        File vortekLibrary = new File(libDir, "libvulkan_vortek.so");
++        File openGLLibrary = new File(libDir, "libGL.so.1.7.0");
++        File icdDir = new File(rootDir, "/usr/share/vulkan/icd.d");
++        boolean missing = (GraphicsDrivers.TURNIP.equals(vulkan) &&
++                (!turnipLibrary.isFile() || !new File(icdDir, "freedreno_icd.aarch64.json").isFile())) ||
++            (GraphicsDrivers.VORTEK.equals(vulkan) &&
++                (!vortekLibrary.isFile() || !new File(icdDir, "vortek_icd.aarch64.json").isFile())) ||
++            (GraphicsDrivers.isOpenGLDriver(openGL) && !openGLLibrary.isFile());
++        boolean install = missing || !cacheId.equals(preferences.getString("current_graphics_driver", ""));
++        if (install) {
++            preferences.edit().remove("current_graphics_driver").apply();
++            FileUtils.delete(turnipLibrary);
++            FileUtils.delete(vortekLibrary);
++            FileUtils.delete(openGLLibrary);
++            FileUtils.delete(icdDir);
++            if (hasVulkanDriver()) {
++                if (!icdDir.mkdirs() && !icdDir.isDirectory()) throw new IllegalStateException("Cannot create Vulkan ICD directory");
++                if (GraphicsDrivers.TURNIP.equals(vulkan)) {
++                    requireGraphicsFiles(GeneralComponents.extractFile(GeneralComponents.Type.TURNIP, this,
++                        vulkanVersion, DefaultVersion.TURNIP), vulkan);
++                }
++                else {
++                    requireGraphicsFiles(TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
++                        "graphics_driver/vortek-"+DefaultVersion.VORTEK+".tzst", rootDir), vulkan);
++                }
+             }
++            if (GraphicsDrivers.isOpenGLDriver(openGL)) {
++                requireGraphicsFiles(TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
++                    "graphics_driver/"+openGL+"-"+DefaultVersion.valueOf(openGL)+".tzst", rootDir), openGL);
++            }
++            preferences.edit().putString("current_graphics_driver", cacheId).apply();
+         }
+-        else if (graphicsDriver[0].equals(GraphicsDrivers.VORTEK) && (changed || MainActivity.DEBUG_MODE)) {
+-            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/vortek-" + DefaultVersion.VORTEK + ".tzst", rootDir);
+-        }
+-
+-        switch (graphicsDriver[1]) {
++        switch (openGL) {
+             case GraphicsDrivers.ZINK:
+                 envVars.put("GALLIUM_DRIVER", "zink");
+                 envVars.put("ZINK_CONTEXT_THREADED", "1");
+-                if (graphicsDriver[0].equals(GraphicsDrivers.VORTEK)) envVars.put("MESA_GL_VERSION_OVERRIDE", "3.3");
+-
+-                if (changed) TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/zink-"+DefaultVersion.ZINK+".tzst", rootDir);
++                if (GraphicsDrivers.VORTEK.equals(vulkan)) envVars.put("MESA_GL_VERSION_OVERRIDE", "3.3");
+                 break;
+             case GraphicsDrivers.VIRGL:
+                 envVars.put("GALLIUM_DRIVER", "virpipe");
+                 envVars.put("VIRGL_NO_READBACK", "true");
+                 envVars.put("VIRGL_SERVER_PATH", rootDir+UnixSocketConfig.VIRGL_SERVER_PATH);
+                 VirGLConfigDialog.setEnvVars(graphicsDriverConfig[1], envVars);
+-
+-                if (changed) TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/virgl-"+DefaultVersion.VIRGL+".tzst", rootDir);
+                 break;
+             case GraphicsDrivers.GLADIO:
+                 envVars.put("GLADIO_NO_ERROR", "1");
+-
+-                if (changed || MainActivity.DEBUG_MODE) TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/gladio-"+DefaultVersion.GLADIO+".tzst", rootDir);
+                 break;
+         }
+     }
+ 
++    private static void requireGraphicsFiles(boolean installed, String component) {
++        if (!installed) throw new IllegalStateException("Could not activate graphics component "+component);
++    }
++
+     private void showTouchpadHelpDialog() {
+         ContentDialog dialog = new ContentDialog(this, R.layout.touchpad_help_dialog);
+         dialog.setTitle(R.string.touchpad_help);
+@@ -848,82 +978,85 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+     }
+ 
+     private boolean extractDXWrapperFiles() {
+-        String cacheId = "";
+-        if (dxwrapper.equals(DXWrappers.DXVK)) {
+-            DXVKConfigDialog.setEnvVars(this, dxwrapperConfig[0], envVars);
+-            cacheId += dxwrapper+"-"+dxwrapperConfig[0].get("version", DefaultVersion.DXVK(graphicsDriver[0]));
++        boolean dxvk = DXWrappers.DXVK.equals(dxwrapper);
++        boolean vulkan13 = supportsVulkan13();
++        String fallbackVersion = DefaultVersion.WINED3D;
++        if (dxvk) fallbackVersion = vulkan13 ? DefaultVersion.DXVK(graphicsDriver[0]) : DefaultVersion.MINOR_DXVK;
++        String version = dxwrapperConfig[0].get("version", fallbackVersion);
++        String vkd3dVersion = vulkan13 ? dxwrapperConfig[1].get("version", DefaultVersion.VKD3D) : "disabled";
++        boolean modernDxvk = dxvk && DefaultVersion.MODERN_DXVK.equals(version);
++        boolean modernVkd3d = DefaultVersion.MODERN_VKD3D.equals(vkd3dVersion);
++        if ((modernDxvk || modernVkd3d) && !supportsModernWrappers()) {
++            if (modernDxvk) version = fallbackVersion;
++            if (modernVkd3d) vkd3dVersion = DefaultVersion.VKD3D;
++            runOnUiThread(() -> AppUtils.showToast(this, R.string.winblow_graphics_compatible_fallback));
+         }
+-        else if (dxwrapper.equals(DXWrappers.WINED3D)) {
+-            WineD3DConfigDialog.setEnvVars(dxwrapperConfig[0], envVars);
+-            cacheId += dxwrapper+"-"+dxwrapperConfig[0].get("version", DefaultVersion.WINED3D);
+-        }
+-
+         String ddrawWrapper = dxwrapperConfig[0].get("ddrawWrapper", DXWrappers.WINED3D);
+-        cacheId += "-"+DXWrappers.VKD3D+"-"+dxwrapperConfig[1].get("version", DefaultVersion.VKD3D)+"-"+ddrawWrapper;
+-        boolean changed = !cacheId.equals(container.getExtra("dxwrapper"));
+-        VKD3DConfigDialog.setEnvVars(dxwrapperConfig[1], envVars);
+-
+-        if (ddrawWrapper.equals(DXWrappers.CNC_DDRAW)) envVars.put("CNC_DDRAW_CONFIG_FILE", "C:\\ProgramData\\cnc-ddraw\\ddraw.ini");
+-
+-        if (!changed) return false;
+-        container.putExtra("dxwrapper", cacheId);
++        String cacheId = dxwrapper+"-"+version+"-vkd3d-"+vkd3dVersion+"-"+ddrawWrapper;
++        if (dxvk) DXVKConfigDialog.setEnvVars(this, dxwrapperConfig[0], envVars);
++        else WineD3DConfigDialog.setEnvVars(dxwrapperConfig[0], envVars);
++        if (vulkan13) VKD3DConfigDialog.setEnvVars(dxwrapperConfig[1], envVars);
++        if (DXWrappers.CNC_DDRAW.equals(ddrawWrapper)) {
++            envVars.put("CNC_DDRAW_CONFIG_FILE", "C:\\ProgramData\\cnc-ddraw\\ddraw.ini");
++        }
++        if (cacheId.equals(container.getExtra("dxwrapper"))) return false;
+ 
+         File rootDir = rootFS.getRootDir();
+         File windowsDir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows");
+-
+-        if (dxwrapper.equals(DXWrappers.WINED3D)) {
+-            String version = dxwrapperConfig[0].get("version", DefaultVersion.WINED3D);
++        if (!dxvk) {
+             if (version.equals(WineInfo.MAIN_WINE_VERSION)) {
+-                final String[] dlls = {"d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll", "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll", "dxgi.dll", "ddraw.dll", "wined3d.dll"};
+-                restoreBuiltinDllFiles(dlls);
++                restoreBuiltinDllFiles("d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll", "d3d10core.dll",
++                    "d3d11.dll", "d3d12.dll", "d3d12core.dll", "dxgi.dll", "ddraw.dll", "wined3d.dll");
++            }
++            else {
++                requireGraphicsFiles(GeneralComponents.extractFile(GeneralComponents.Type.WINED3D, this,
++                    version, fallbackVersion), DXWrappers.WINED3D);
+             }
+-            else GeneralComponents.extractFile(GeneralComponents.Type.WINED3D, this, version, DefaultVersion.WINED3D);
+         }
+-        else if (dxwrapper.equals(DXWrappers.DXVK)) {
++        else {
+             final boolean[] hasD3D8DllFile = {false};
+             final boolean[] hasD3D10DllFile = {false};
+-
+-            GeneralComponents.extractFile(GeneralComponents.Type.DXVK, this, dxwrapperConfig[0].get("version"), DefaultVersion.DXVK(graphicsDriver[0]), (destination, size) -> {
+-                String name = destination.getName();
+-                if (name.equals("d3d10.dll")) {
+-                    hasD3D10DllFile[0] = true;
+-                }
+-                else if (name.equals("d3d8.dll")) {
+-                    hasD3D8DllFile[0] = true;
+-                }
+-                return destination;
+-            });
+-
++            requireGraphicsFiles(GeneralComponents.extractFile(GeneralComponents.Type.DXVK, this, version,
++                fallbackVersion, (destination, size) -> {
++                    if (destination.getName().equals("d3d10.dll")) hasD3D10DllFile[0] = true;
++                    if (destination.getName().equals("d3d8.dll")) hasD3D8DllFile[0] = true;
++                    return destination;
++                }), DXWrappers.DXVK);
+             if (!hasD3D8DllFile[0]) {
+-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/d8vk-"+DefaultVersion.D8VK+".tzst", windowsDir);
++                requireGraphicsFiles(TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
++                    "dxwrapper/d8vk-"+DefaultVersion.D8VK+".tzst", windowsDir), "D8VK");
+             }
+             if (!hasD3D10DllFile[0]) restoreBuiltinDllFiles("d3d10.dll", "d3d10_1.dll");
+         }
+-
+-        GeneralComponents.extractFile(GeneralComponents.Type.VKD3D, this, dxwrapperConfig[1].get("version"), DefaultVersion.VKD3D);
+-
+-        File containerSysWoW64Dir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows/syswow64");
++        if (vulkan13) {
++            requireGraphicsFiles(GeneralComponents.extractFile(GeneralComponents.Type.VKD3D, this,
++                vkd3dVersion, DefaultVersion.VKD3D), DXWrappers.VKD3D);
++        }
++        else restoreBuiltinDllFiles("d3d12.dll", "d3d12core.dll");
++        File containerSysWoW64Dir = new File(windowsDir, "syswow64");
+         FileUtils.delete(new File(containerSysWoW64Dir, "ddraw_.dll"));
+-
+         switch (ddrawWrapper) {
+             case DXWrappers.CNC_DDRAW:
+-                final String assetDir = "dxwrapper/cnc-ddraw-"+DefaultVersion.CNC_DDRAW;
+-                File configFile = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/ddraw.ini");
++                String assetDir = "dxwrapper/cnc-ddraw-"+DefaultVersion.CNC_DDRAW;
++                File configFile = new File(windowsDir, "../ProgramData/cnc-ddraw/ddraw.ini");
+                 if (!configFile.isFile()) FileUtils.copy(this, assetDir+"/ddraw.ini", configFile);
+-                File shadersDir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/Shaders");
++                File shadersDir = new File(windowsDir, "../ProgramData/cnc-ddraw/Shaders");
+                 FileUtils.delete(shadersDir);
+                 FileUtils.copy(this, assetDir+"/Shaders", shadersDir);
+-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, assetDir+"/ddraw.tzst", windowsDir);
++                requireGraphicsFiles(TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
++                    assetDir+"/ddraw.tzst", windowsDir), DXWrappers.CNC_DDRAW);
+                 break;
+             case DXWrappers.D7VK:
+                 restoreBuiltinDllFiles("ddraw.dll");
+-                (new File(containerSysWoW64Dir, "ddraw.dll")).renameTo(new File(containerSysWoW64Dir, "ddraw_.dll"));
+-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/d7vk-"+DefaultVersion.D7VK+".tzst", windowsDir);
++                new File(containerSysWoW64Dir, "ddraw.dll").renameTo(new File(containerSysWoW64Dir, "ddraw_.dll"));
++                requireGraphicsFiles(TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
++                    "dxwrapper/d7vk-"+DefaultVersion.D7VK+".tzst", windowsDir), DXWrappers.D7VK);
+                 break;
+             default:
+                 restoreBuiltinDllFiles("ddraw.dll");
+                 break;
+         }
++        container.putExtra("dxwrapper", cacheId);
+         return true;
+     }
+ 
+diff --git a/app/src/main/java/com/winlator/container/DXWrapperPicker.java b/app/src/main/java/com/winlator/container/DXWrapperPicker.java
+index 22980d4..49dc464 100644
+--- a/app/src/main/java/com/winlator/container/DXWrapperPicker.java
++++ b/app/src/main/java/com/winlator/container/DXWrapperPicker.java
+@@ -61,13 +61,7 @@ public class DXWrapperPicker {
+     }
+ 
+     public String getDXWrapperConfig() {
+-        StringBuilder dxwrapperConfig = new StringBuilder();
+-        for (int i = 0; i < container.getChildCount(); i++) {
+-            TaggedSelectionBox taggedSelectionBox = (TaggedSelectionBox)container.getChildAt(i);
+-            if (dxwrapperConfig.length() > 0) dxwrapperConfig.append('|');
+-            dxwrapperConfig.append(taggedSelectionBox.getTag().toString());
+-        }
+-        return dxwrapperConfig.toString();
++        return container.getChildAt(0).getTag()+"|"+container.getChildAt(1).getTag();
+     }
+ 
+     private static void showDXWrapperConfigDialog(String dxwrapper, String graphicsDriver, View anchor) {
+diff --git a/app/src/main/java/com/winlator/container/DXWrappers.java b/app/src/main/java/com/winlator/container/DXWrappers.java
+index c8437c8..02a846f 100644
+--- a/app/src/main/java/com/winlator/container/DXWrappers.java
++++ b/app/src/main/java/com/winlator/container/DXWrappers.java
+@@ -34,11 +34,12 @@ public abstract class DXWrappers {
+             return new KeyValueSet[]{new KeyValueSet(first), new KeyValueSet(second)};
+         }
+         else if (dxwrapper != null) {
+-            if (dxwrapper.equals(WINED3D) || dxwrapper.equals(DXVK)) {
+-                return new KeyValueSet[]{new KeyValueSet(dxwrapperConfig), new KeyValueSet()};
++            KeyValueSet config = new KeyValueSet(dxwrapperConfig);
++            if (dxwrapper.equals(VKD3D) || !config.get("featureLevel").isEmpty()) {
++                return new KeyValueSet[]{new KeyValueSet(), config};
+             }
+-            else if (dxwrapper.equals(VKD3D)) {
+-                return new KeyValueSet[]{new KeyValueSet(), new KeyValueSet(dxwrapperConfig)};
++            if (dxwrapper.equals(WINED3D) || dxwrapper.equals(DXVK)) {
++                return new KeyValueSet[]{config, new KeyValueSet()};
+             }
+         }
+         return new KeyValueSet[]{new KeyValueSet(), new KeyValueSet()};
+diff --git a/app/src/main/java/com/winlator/container/GraphicsDevice.java b/app/src/main/java/com/winlator/container/GraphicsDevice.java
+new file mode 100644
+index 0000000..5d94c04
+--- /dev/null
++++ b/app/src/main/java/com/winlator/container/GraphicsDevice.java
+@@ -0,0 +1,44 @@
++package com.winlator.container;
++
++import android.app.ActivityManager;
++import android.content.Context;
++import android.content.pm.FeatureInfo;
++import android.content.pm.PackageManager;
++
++import com.winlator.core.GPUHelper;
++
++public final class GraphicsDevice {
++    public final String renderer;
++    public final int vulkanVersion;
++    public final boolean lowMemory;
++    private final int adrenoModel;
++
++    private GraphicsDevice(String renderer, int vulkanVersion, boolean lowMemory, int adrenoModel) {
++        this.renderer = renderer;
++        this.vulkanVersion = vulkanVersion;
++        this.lowMemory = lowMemory;
++        this.adrenoModel = adrenoModel;
++    }
++
++    public static GraphicsDevice detect(Context context) {
++        ActivityManager manager = (ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
++        ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
++        manager.getMemoryInfo(memory);
++        boolean lowMemory = manager.isLowRamDevice() || memory.totalMem < 5L * 1024 * 1024 * 1024;
++        String renderer = GPUHelper.glGetRenderer(context);
++        return new GraphicsDevice(renderer, vulkanVersion(context), lowMemory, GPUHelper.adrenoModelId(renderer));
++    }
++
++    public static int vulkanVersion(Context context) {
++        FeatureInfo[] features = context.getPackageManager().getSystemAvailableFeatures();
++        if (features == null) return 0;
++        for (FeatureInfo feature : features) {
++            if (PackageManager.FEATURE_VULKAN_HARDWARE_VERSION.equals(feature.name)) return feature.version;
++        }
++        return 0;
++    }
++
++    public GraphicsProfile.Settings resolve(GraphicsProfile profile, int frameCap) {
++        return profile.resolve(vulkanVersion, adrenoModel, lowMemory, frameCap);
++    }
++}
+diff --git a/app/src/main/java/com/winlator/container/GraphicsDriverPicker.java b/app/src/main/java/com/winlator/container/GraphicsDriverPicker.java
+index ed2e579..818c965 100644
+--- a/app/src/main/java/com/winlator/container/GraphicsDriverPicker.java
++++ b/app/src/main/java/com/winlator/container/GraphicsDriverPicker.java
+@@ -28,6 +28,11 @@ public class GraphicsDriverPicker {
+             taggedSelectionBox.setItems(GraphicsDrivers.getItems(apiNames[i]));
+             taggedSelectionBox.setSelectedItem(GraphicsDrivers.getName(identifiers[i]));
+             taggedSelectionBox.setTag(configs[i].toString());
++            final String[] previous = {taggedSelectionBox.getSelectedItem()};
++            taggedSelectionBox.setOnItemSelectedListener(item -> {
++                if (!item.equals(previous[0])) taggedSelectionBox.setTag("");
++                previous[0] = item;
++            });
+             taggedSelectionBox.setOnButtonClickListener(() -> {
+                 final String graphicsDriver = StringUtils.parseIdentifier(taggedSelectionBox.getSelectedItem());
+                 showGraphicsDriverConfigDialog(graphicsDriver, taggedSelectionBox);
+@@ -47,13 +52,7 @@ public class GraphicsDriverPicker {
+     }
+ 
+     public String getGraphicsDriverConfig() {
+-        StringBuilder graphicsDriverConfig = new StringBuilder();
+-        for (int i = 0; i < container.getChildCount(); i++) {
+-            TaggedSelectionBox taggedSelectionBox = (TaggedSelectionBox)container.getChildAt(i);
+-            if (graphicsDriverConfig.length() > 0) graphicsDriverConfig.append('|');
+-            graphicsDriverConfig.append(taggedSelectionBox.getTag().toString());
+-        }
+-        return graphicsDriverConfig.toString();
++        return container.getChildAt(0).getTag()+"|"+container.getChildAt(1).getTag();
+     }
+ 
+     private static void showGraphicsDriverConfigDialog(String graphicsDriver, View anchor) {
+diff --git a/app/src/main/java/com/winlator/container/GraphicsDrivers.java b/app/src/main/java/com/winlator/container/GraphicsDrivers.java
+index d8d8990..bce0e5e 100644
+--- a/app/src/main/java/com/winlator/container/GraphicsDrivers.java
++++ b/app/src/main/java/com/winlator/container/GraphicsDrivers.java
+@@ -1,8 +1,5 @@
+ package com.winlator.container;
+ 
+-import android.content.Context;
+-
+-import com.winlator.core.GPUHelper;
+ import com.winlator.core.KeyValueSet;
+ 
+ public abstract class GraphicsDrivers {
+@@ -11,6 +8,7 @@ public abstract class GraphicsDrivers {
+     public static final String ZINK = "zink";
+     public static final String VIRGL = "virgl";
+     public static final String GLADIO = "gladio";
++    public static final String NONE = "none";
+     public static final String DEFAULT_VULKAN_DRIVER = VORTEK;
+     public static final String DEFAULT_OPENGL_DRIVER = GLADIO;
+ 
+@@ -35,10 +33,10 @@ public abstract class GraphicsDrivers {
+ 
+     public static String[] getItems(String apiName) {
+         if (apiName.equalsIgnoreCase("VULKAN")) {
+-            return new String[]{getName(TURNIP), getName(VORTEK)};
++            return new String[]{getName(TURNIP), getName(VORTEK), getName(NONE)};
+         }
+         else if (apiName.equalsIgnoreCase("OPENGL")) {
+-            return new String[]{getName(ZINK), getName(VIRGL), getName(GLADIO)};
++            return new String[]{getName(ZINK), getName(VIRGL), getName(GLADIO), getName(NONE)};
+         }
+         else return new String[0];
+     }
+@@ -46,7 +44,10 @@ public abstract class GraphicsDrivers {
+     public static String[] parseIdentifiers(String graphicsDriver) {
+         if (graphicsDriver == null || graphicsDriver.isEmpty()) return new String[]{DEFAULT_VULKAN_DRIVER, DEFAULT_OPENGL_DRIVER};
+         if (graphicsDriver.contains(",")) {
+-            return graphicsDriver.split(",");
++            String[] pair = graphicsDriver.split(",", -1);
++            String vulkan = isVulkanDriver(pair[0]) || NONE.equals(pair[0]) ? pair[0] : DEFAULT_VULKAN_DRIVER;
++            String openGL = isOpenGLDriver(pair[1]) || NONE.equals(pair[1]) ? pair[1] : DEFAULT_OPENGL_DRIVER;
++            return new String[]{vulkan, openGL};
+         }
+         else {
+             if (isVulkanDriver(graphicsDriver)) {
+@@ -67,18 +68,12 @@ public abstract class GraphicsDrivers {
+             String second = graphicsDriverConfig.substring(separator + 1);
+             return new KeyValueSet[]{new KeyValueSet(first), new KeyValueSet(second)};
+         }
+-        else {
+-            if (isVulkanDriver(graphicsDriver)) {
+-                return new KeyValueSet[]{new KeyValueSet(graphicsDriverConfig), new KeyValueSet()};
+-            }
+-            else if (isOpenGLDriver(graphicsDriver)) {
+-                return new KeyValueSet[]{new KeyValueSet(), new KeyValueSet(graphicsDriverConfig)};
+-            }
+-            else return new KeyValueSet[]{new KeyValueSet(), new KeyValueSet()};
++        KeyValueSet config = new KeyValueSet(graphicsDriverConfig);
++        if (isOpenGLDriver(graphicsDriver) || (graphicsDriver != null && graphicsDriver.contains(",") &&
++                (!config.get("glVersion").isEmpty() || !config.get("disableVertexArrayBGRA").isEmpty()))) {
++            return new KeyValueSet[]{new KeyValueSet(), config};
+         }
++        return new KeyValueSet[]{config, new KeyValueSet()};
+     }
+ 
+-    public static String getDefaultDriver(Context context) {
+-        return GPUHelper.getAdrenoModelId(context) > 0 ? GraphicsDrivers.TURNIP+","+GraphicsDrivers.DEFAULT_OPENGL_DRIVER : GraphicsDrivers.VORTEK+","+GraphicsDrivers.DEFAULT_OPENGL_DRIVER;
+-    }
+ }
+diff --git a/app/src/main/java/com/winlator/container/GraphicsProfile.java b/app/src/main/java/com/winlator/container/GraphicsProfile.java
+new file mode 100644
+index 0000000..dedaeb8
+--- /dev/null
++++ b/app/src/main/java/com/winlator/container/GraphicsProfile.java
+@@ -0,0 +1,65 @@
++package com.winlator.container;
++
++import com.winlator.core.KeyValueSet;
++
++public enum GraphicsProfile {
++    AUTO, VULKAN, VIRGL, GLADIO, ZINK, RETRO, SAFE;
++
++    public static final int RECOMMENDED_FRAME_CAP = -1;
++    private static final int VULKAN_1_1 = (1 << 22) | (1 << 12);
++    private static final int VULKAN_1_2 = (1 << 22) | (2 << 12);
++    private static final int VULKAN_1_3 = (1 << 22) | (3 << 12);
++
++    public boolean isAvailable(int vulkanVersion) {
++        if (this == VULKAN) return vulkanVersion >= VULKAN_1_1;
++        if (this == ZINK) return vulkanVersion >= VULKAN_1_2;
++        return true;
++    }
++
++    public Settings resolve(int vulkanVersion, int adrenoModel, boolean lowMemory, int frameCap) {
++        boolean turnip = adrenoModel >= 600 && adrenoModel < 800;
++        GraphicsProfile profile = this;
++        if (profile == AUTO) {
++            profile = (turnip || (!lowMemory && vulkanVersion >= VULKAN_1_3)) ? VULKAN : VIRGL;
++        }
++        if (!profile.isAvailable(vulkanVersion)) profile = VIRGL;
++        String vulkan = turnip ? GraphicsDrivers.TURNIP : GraphicsDrivers.VORTEK;
++        String resolution = lowMemory ? "960x540" : "1280x720";
++        switch (profile) {
++            case VULKAN:
++                KeyValueSet dxvk = new KeyValueSet();
++                if (lowMemory) dxvk.put("maxDeviceMemory", 1024).put("compilerThreads", 2);
++                if (frameCap == RECOMMENDED_FRAME_CAP) frameCap = lowMemory ? 30 : 60;
++                if (frameCap > 0) dxvk.put("framerate", frameCap);
++                return new Settings(vulkan, turnip ? GraphicsDrivers.GLADIO : GraphicsDrivers.VIRGL,
++                    DXWrappers.DXVK, dxvk.toString(), resolution);
++            case ZINK:
++                return new Settings(vulkan, GraphicsDrivers.ZINK, DXWrappers.WINED3D, "", resolution);
++            case GLADIO:
++                return new Settings(GraphicsDrivers.NONE, GraphicsDrivers.GLADIO, DXWrappers.WINED3D, "", resolution);
++            case RETRO:
++                return new Settings(GraphicsDrivers.NONE, GraphicsDrivers.GLADIO, DXWrappers.WINED3D,
++                    "ddrawWrapper=cnc-ddraw", "960x540");
++            case SAFE:
++                return new Settings(GraphicsDrivers.NONE, GraphicsDrivers.NONE, DXWrappers.WINED3D,
++                    "renderer=gdi", "800x600");
++            default:
++                return new Settings(GraphicsDrivers.NONE, GraphicsDrivers.VIRGL, DXWrappers.WINED3D,
++                    lowMemory ? "VideoMemorySize=1024" : "", resolution);
++        }
++    }
++
++    public static final class Settings {
++        public final String drivers;
++        public final String wrapper;
++        public final String wrapperConfig;
++        public final String resolution;
++
++        private Settings(String vulkan, String openGL, String wrapper, String wrapperConfig, String resolution) {
++            this.drivers = vulkan+","+openGL;
++            this.wrapper = wrapper;
++            this.wrapperConfig = wrapperConfig;
++            this.resolution = resolution;
++        }
++    }
++}
+diff --git a/app/src/main/java/com/winlator/contentdialog/DXVKConfigDialog.java b/app/src/main/java/com/winlator/contentdialog/DXVKConfigDialog.java
+index 5ce355a..fab83da 100644
+--- a/app/src/main/java/com/winlator/contentdialog/DXVKConfigDialog.java
++++ b/app/src/main/java/com/winlator/contentdialog/DXVKConfigDialog.java
+@@ -54,6 +54,7 @@ public class DXVKConfigDialog extends ContentDialog {
+ 
+         setOnConfirmCallback(() -> {
+             KeyValueSet newConfig = new KeyValueSet();
++            if (!config.get("compilerThreads").isEmpty()) newConfig.put("compilerThreads", config.get("compilerThreads"));
+             newConfig.put("version", sVersion.getSelectedItem().toString());
+             newConfig.put("framerate", StringUtils.parseNumber(sFramerate.getSelectedItem()));
+             newConfig.put("maxDeviceMemory", StringUtils.parseMemorySize(sMaxDeviceMemory.getSelectedItem()));
+@@ -94,6 +95,8 @@ public class DXVKConfigDialog extends ContentDialog {
+             content += "dxgi.maxSharedMemory = "+maxDeviceMemory+"\n";
+         }
+ 
++        int compilerThreads = config.getInt("compilerThreads", 0);
++        if (compilerThreads > 0) content += "dxvk.numCompilerThreads = "+compilerThreads+"\n";
+         String framerate = config.get("framerate");
+         if (!framerate.isEmpty() && !framerate.equals("0")) {
+             content += "dxgi.maxFrameRate = "+framerate+"\n";
+diff --git a/app/src/main/java/com/winlator/contentdialog/GraphicsProfileDialog.java b/app/src/main/java/com/winlator/contentdialog/GraphicsProfileDialog.java
+new file mode 100644
+index 0000000..f47c5bc
+--- /dev/null
++++ b/app/src/main/java/com/winlator/contentdialog/GraphicsProfileDialog.java
+@@ -0,0 +1,94 @@
++package com.winlator.contentdialog;
++
++import android.app.Activity;
++import android.view.View;
++import android.widget.AdapterView;
++import android.widget.ArrayAdapter;
++import android.widget.CheckBox;
++import android.widget.Spinner;
++import android.widget.TextView;
++
++import androidx.appcompat.app.AlertDialog;
++
++import com.winlator.R;
++import com.winlator.container.Container;
++import com.winlator.container.DXWrappers;
++import com.winlator.container.GraphicsDevice;
++import com.winlator.container.GraphicsDrivers;
++import com.winlator.container.GraphicsProfile;
++import com.winlator.core.AppUtils;
++import com.winlator.core.GPUHelper;
++import com.winlator.widget.FrameRating;
++
++import java.util.ArrayList;
++
++public final class GraphicsProfileDialog {
++    private static final int[] FRAME_CAPS = {GraphicsProfile.RECOMMENDED_FRAME_CAP, 0, 30, 45, 60};
++    private final AlertDialog dialog;
++
++    public GraphicsProfileDialog(Activity activity, Container container, GraphicsDevice device) {
++        View view = activity.getLayoutInflater().inflate(R.layout.winblow_graphics_dialog, null);
++        TextView hardware = view.findViewById(R.id.TVGraphicsHardware);
++        String gpuName = device.renderer.isEmpty() ? activity.getString(R.string.winblow_gpu_unknown) : device.renderer;
++        String vulkan = device.vulkanVersion == 0 ? activity.getString(R.string.winblow_vulkan_unavailable) :
++            GPUHelper.vkVersionMajor(device.vulkanVersion)+"."+GPUHelper.vkVersionMinor(device.vulkanVersion);
++        hardware.setText(activity.getString(R.string.winblow_graphics_hardware, gpuName, vulkan));
++
++        ArrayList<GraphicsProfile> profiles = new ArrayList<>();
++        ArrayList<String> labels = new ArrayList<>();
++        String[] names = activity.getResources().getStringArray(R.array.winblow_graphics_profiles);
++        for (GraphicsProfile profile : GraphicsProfile.values()) {
++            if (profile.isAvailable(device.vulkanVersion)) {
++                profiles.add(profile);
++                labels.add(names[profile.ordinal()]);
++            }
++        }
++        Spinner presets = view.findViewById(R.id.SGraphicsProfile);
++        presets.setAdapter(new ArrayAdapter<>(activity, android.R.layout.simple_spinner_dropdown_item, labels));
++        Spinner resolution = view.findViewById(R.id.SGraphicsResolution);
++        String[] sizes = {"", container.getScreenSize(), "800x600", "960x540", "1280x720", "1600x900", "1920x1080"};
++        Spinner cap = view.findViewById(R.id.SGraphicsFrameLimit);
++        TextView preview = view.findViewById(R.id.TVGraphicsPreview);
++        CheckBox showFps = view.findViewById(R.id.CBGraphicsShowFPS);
++        showFps.setChecked(container.getHUDMode() != FrameRating.Mode.DISABLED.ordinal());
++        presets.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
++            @Override
++            public void onItemSelected(AdapterView<?> parent, View item, int position, long id) {
++                GraphicsProfile.Settings settings = device.resolve(profiles.get(position), GraphicsProfile.RECOMMENDED_FRAME_CAP);
++                String[] drivers = GraphicsDrivers.parseIdentifiers(settings.drivers);
++                preview.setText(activity.getString(R.string.winblow_graphics_preview,
++                    GraphicsDrivers.getName(drivers[0]), GraphicsDrivers.getName(drivers[1]),
++                    DXWrappers.getName(settings.wrapper), settings.resolution.replace("x", "×")));
++                cap.setEnabled(DXWrappers.DXVK.equals(settings.wrapper));
++            }
++
++            @Override
++            public void onNothingSelected(AdapterView<?> parent) {}
++        });
++        dialog = new AlertDialog.Builder(activity)
++            .setTitle(R.string.winblow_graphics_presets)
++            .setView(view)
++            .setNegativeButton(android.R.string.cancel, null)
++            .setPositiveButton(R.string.winblow_apply_graphics, (dialog, button) -> {
++                GraphicsProfile.Settings settings = device.resolve(profiles.get(presets.getSelectedItemPosition()),
++                    FRAME_CAPS[cap.getSelectedItemPosition()]);
++                String size = sizes[resolution.getSelectedItemPosition()];
++                container.setScreenSize(size.isEmpty() ? settings.resolution : size);
++                container.setGraphicsDriver(settings.drivers);
++                container.setGraphicsDriverConfig("");
++                container.setDXWrapper(settings.wrapper);
++                container.setDXWrapperConfig(settings.wrapperConfig);
++                if (!showFps.isChecked()) container.setHUDMode((byte)FrameRating.Mode.DISABLED.ordinal());
++                else if (container.getHUDMode() == FrameRating.Mode.DISABLED.ordinal()) {
++                    container.setHUDMode((byte)FrameRating.Mode.SIMPLE.ordinal());
++                }
++                container.saveData();
++                AppUtils.showToast(activity, R.string.winblow_graphics_applied);
++            })
++            .create();
++    }
++
++    public void show() {
++        dialog.show();
++    }
++}
+diff --git a/app/src/main/java/com/winlator/contentdialog/TurnipConfigDialog.java b/app/src/main/java/com/winlator/contentdialog/TurnipConfigDialog.java
+index 1e1afcf..5dcba37 100644
+--- a/app/src/main/java/com/winlator/contentdialog/TurnipConfigDialog.java
++++ b/app/src/main/java/com/winlator/contentdialog/TurnipConfigDialog.java
+@@ -61,17 +61,17 @@ public class TurnipConfigDialog extends ContentDialog {
+         if (!maxDeviceMemory.equals("0")) envVars.put("TU_OVERRIDE_HEAP_SIZE", maxDeviceMemory);
+         if (config.getBoolean("directRendering", true)) envVars.put("MESA_VK_WSI_NATIVE_MEM_IMPORTED", "1");
+ 
++        GPUHelper.VkPresentMode[] modes = GPUHelper.VkPresentMode.values();
+         int presentModeIdx = config.getInt("presentMode", DEFAULT_PRESENT_MODE.ordinal());
+-        String presentMode = GPUHelper.VkPresentMode.values()[presentModeIdx].value();
++        String presentMode = (presentModeIdx >= 0 && presentModeIdx < modes.length ? modes[presentModeIdx] : DEFAULT_PRESENT_MODE).value();
+         envVars.put("MESA_VK_WSI_PRESENT_MODE", presentMode);
+ 
+         String tuDebug = envVars.get("TU_DEBUG");
+-        if (isForceSYSMEM(context) && !tuDebug.contains("sysmem")) {
+-            envVars.put("TU_DEBUG", (!tuDebug.isEmpty() ? tuDebug+"," : "")+"sysmem");
++        if (!tuDebug.contains("sysmem") && !tuDebug.contains("gmem")) {
++            if (isForceSYSMEM(context)) tuDebug = (!tuDebug.isEmpty() ? tuDebug+"," : "")+"sysmem";
++            else if (isForceGMEM(context)) tuDebug = (!tuDebug.isEmpty() ? tuDebug+"," : "")+"gmem";
+         }
+-        else if (isForceGMEM(context) && !tuDebug.contains("gmem")) {
+-            envVars.put("TU_DEBUG", (!tuDebug.isEmpty() ? tuDebug+"," : "")+"gmem");
+-        }
+-        envVars.put("TU_DEBUG", (!tuDebug.isEmpty() ? tuDebug+"," : "")+"deck_emu");
++        if (!tuDebug.contains("deck_emu")) tuDebug = (!tuDebug.isEmpty() ? tuDebug+"," : "")+"deck_emu";
++        envVars.put("TU_DEBUG", tuDebug);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/java/com/winlator/core/AppUtils.java b/app/src/main/java/com/winlator/core/AppUtils.java
+index adf5ea7..24f6ede 100644
+--- a/app/src/main/java/com/winlator/core/AppUtils.java
++++ b/app/src/main/java/com/winlator/core/AppUtils.java
+@@ -50,6 +50,7 @@ public abstract class AppUtils {
+     public static class RestartApplicationOptions {
+         public int selectedMenuItemId;
+         public int containerId;
++        public int safeDesktopId;
+         public String startPath;
+     }
+ 
+@@ -75,6 +76,7 @@ public abstract class AppUtils {
+         if (options != null) {
+             if (options.selectedMenuItemId > 0) mainIntent.putExtra("selected_menu_item_id", options.selectedMenuItemId);
+             if (options.containerId > 0) mainIntent.putExtra("container_id", options.containerId);
++            if (options.safeDesktopId > 0) mainIntent.putExtra("safe_desktop_id", options.safeDesktopId);
+             if (options.startPath != null) mainIntent.putExtra("start_path", options.startPath);
+         }
+ 
+diff --git a/app/src/main/java/com/winlator/core/DefaultVersion.java b/app/src/main/java/com/winlator/core/DefaultVersion.java
+index 86aa7b1..cf3618e 100644
+--- a/app/src/main/java/com/winlator/core/DefaultVersion.java
++++ b/app/src/main/java/com/winlator/core/DefaultVersion.java
+@@ -19,6 +19,8 @@ public abstract class DefaultVersion {
+     public static final String SOUNDFONT = "SONiVOX-EAS-GM-Wavetable";
+     public static final String MINOR_DXVK = "1.10.3";
+     public static final String MAJOR_DXVK = "2.4.1";
++    public static final String MODERN_DXVK = "3.1.1";
++    public static final String MODERN_VKD3D = "3.1";
+ 
+     public static String DXVK() {
+         return DXVK(null);
+@@ -47,4 +49,4 @@ public abstract class DefaultVersion {
+             default: return "0.0";
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/java/com/winlator/core/GPUHelper.java b/app/src/main/java/com/winlator/core/GPUHelper.java
+index bdcf8ab..57b323d 100644
+--- a/app/src/main/java/com/winlator/core/GPUHelper.java
++++ b/app/src/main/java/com/winlator/core/GPUHelper.java
+@@ -3,21 +3,25 @@ package com.winlator.core;
+ import android.content.Context;
+ import android.content.SharedPreferences;
+ import android.opengl.EGL14;
++import android.opengl.EGLConfig;
++import android.opengl.EGLContext;
++import android.opengl.EGLDisplay;
++import android.opengl.EGLSurface;
++import android.opengl.GLES20;
++import android.os.Build;
+ 
+ import androidx.collection.ArrayMap;
+ import androidx.preference.PreferenceManager;
+ 
+ import java.util.Locale;
+ import java.util.Objects;
++import java.util.concurrent.ExecutionException;
++import java.util.concurrent.FutureTask;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.TimeoutException;
+ import java.util.regex.Matcher;
+ import java.util.regex.Pattern;
+ 
+-import javax.microedition.khronos.egl.EGL10;
+-import javax.microedition.khronos.egl.EGLConfig;
+-import javax.microedition.khronos.egl.EGLContext;
+-import javax.microedition.khronos.egl.EGLDisplay;
+-import javax.microedition.khronos.opengles.GL10;
+-
+ import dalvik.annotation.optimization.CriticalNative;
+ 
+ public abstract class GPUHelper {
+@@ -34,97 +38,98 @@ public abstract class GPUHelper {
+         System.loadLibrary("winlator");
+     }
+ 
+-    private static ArrayMap<String, String> loadGPUInformation(Context context) {
+-        final Thread thread = Thread.currentThread();
+-        final ArrayMap<String, String> gpuInfo = new ArrayMap<>();
+-        gpuInfo.put("renderer", "");
+-        gpuInfo.put("vendor", "");
+-        gpuInfo.put("version", "");
+-
+-        (new Thread(() -> {
+-            int[] attribList = new int[] {
+-                EGL10.EGL_SURFACE_TYPE, EGL10.EGL_PBUFFER_BIT,
+-                EGL10.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+-                EGL10.EGL_RED_SIZE, 8,
+-                EGL10.EGL_GREEN_SIZE, 8,
+-                EGL10.EGL_BLUE_SIZE, 8,
+-                EGL10.EGL_ALPHA_SIZE, 0,
+-                EGL10.EGL_NONE
+-            };
+-            EGLConfig[] configs = new EGLConfig[1];
+-            int[] configCounts = new int[1];
+-
+-            EGL10 egl = (EGL10)EGLContext.getEGL();
+-            EGLDisplay eglDisplay = egl.eglGetDisplay(EGL10.EGL_DEFAULT_DISPLAY);
+-
+-            int[] version = new int[2];
+-            egl.eglInitialize(eglDisplay, version);
+-            egl.eglChooseConfig(eglDisplay, attribList, configs, 1, configCounts);
+-
+-            attribList = new int[]{EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL10.EGL_NONE};
+-            EGLContext eglContext = egl.eglCreateContext(eglDisplay, configs[0], EGL10.EGL_NO_CONTEXT, attribList);
+-
+-            egl.eglMakeCurrent(eglDisplay, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, eglContext);
+-
+-            GL10 gl = (GL10)eglContext.getGL();
+-            String gpuRenderer = Objects.toString(gl.glGetString(GL10.GL_RENDERER), "");
+-            String gpuVendor = Objects.toString(gl.glGetString(GL10.GL_VENDOR), "");
+-            String gpuVersion = Objects.toString(gl.glGetString(GL10.GL_VERSION), "");
+-
+-            gpuInfo.put("renderer", gpuRenderer);
+-            gpuInfo.put("vendor", gpuVendor);
+-            gpuInfo.put("version", gpuVersion);
+-
+-            final SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+-            preferences.edit()
+-                .putString("gpu_renderer", gpuRenderer)
+-                .putString("gpu_vendor", gpuVendor)
+-                .putString("gpu_version", gpuVersion)
+-                .apply();
+-
+-            synchronized (thread) {
+-                thread.notify();
+-            }
+-        })).start();
++    private static FutureTask<ArrayMap<String, String>> gpuProbe;
+ 
+-        synchronized (thread) {
+-            try {
+-                thread.wait();
++    private static ArrayMap<String, String> probeEGL() {
++        ArrayMap<String, String> result = new ArrayMap<>();
++        EGLDisplay display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
++        if (display == EGL14.EGL_NO_DISPLAY || !EGL14.eglInitialize(display, new int[2], 0, new int[2], 0)) {
++            return result;
++        }
++        EGLConfig[] configs = new EGLConfig[1];
++        int[] count = new int[1];
++        int[] attributes = {
++            EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT,
++            EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
++            EGL14.EGL_NONE
++        };
++        if (!EGL14.eglChooseConfig(display, attributes, 0, configs, 0, 1, count, 0) || count[0] == 0) return result;
++        EGLContext context = EGL14.eglCreateContext(display, configs[0], EGL14.EGL_NO_CONTEXT,
++            new int[]{EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE}, 0);
++        if (context == EGL14.EGL_NO_CONTEXT) return result;
++        EGLSurface surface = EGL14.eglCreatePbufferSurface(display, configs[0],
++            new int[]{EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE}, 0);
++        try {
++            if (surface != EGL14.EGL_NO_SURFACE && EGL14.eglMakeCurrent(display, surface, surface, context)) {
++                result.put("renderer", Objects.toString(GLES20.glGetString(GLES20.GL_RENDERER), ""));
++                result.put("vendor", Objects.toString(GLES20.glGetString(GLES20.GL_VENDOR), ""));
++                result.put("version", Objects.toString(GLES20.glGetString(GLES20.GL_VERSION), ""));
+             }
+-            catch (InterruptedException e) {}
++            return result;
++        }
++        finally {
++            EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT);
++            if (surface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display, surface);
++            EGL14.eglDestroyContext(display, context);
++            EGL14.eglReleaseThread();
+         }
+-        return gpuInfo;
+     }
+ 
+-    public static String glGetRenderer(Context context) {
+-        final SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+-        String value = preferences.getString("gpu_renderer", "");
+-        if (!value.isEmpty()) return value;
++    private static synchronized FutureTask<ArrayMap<String, String>> startGpuProbe(Context context) {
++        if (gpuProbe == null) {
++            Context app = context.getApplicationContext();
++            gpuProbe = new FutureTask<>(() -> {
++                ArrayMap<String, String> result = probeEGL();
++                if (!result.isEmpty()) {
++                    SharedPreferences.Editor editor = PreferenceManager.getDefaultSharedPreferences(app).edit();
++                    editor.putString("gpu_probe_fingerprint", Build.FINGERPRINT);
++                    for (String key : result.keySet()) editor.putString("gpu_"+key, result.get(key));
++                    editor.apply();
++                }
++                return result;
++            });
++            Thread thread = new Thread(gpuProbe, "winblow-gpu-probe");
++            thread.setDaemon(true);
++            thread.start();
++        }
++        return gpuProbe;
++    }
+ 
+-        ArrayMap<String, String> gpuInfo = loadGPUInformation(context);
+-        return gpuInfo.get("renderer");
++    private static String gpuProperty(Context context, String name) {
++        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
++        if (Build.FINGERPRINT.equals(prefs.getString("gpu_probe_fingerprint", ""))) {
++            return prefs.getString("gpu_"+name, "");
++        }
++        try {
++            return startGpuProbe(context).get(2, TimeUnit.SECONDS).getOrDefault(name, "");
++        }
++        catch (InterruptedException e) {
++            Thread.currentThread().interrupt();
++        }
++        catch (ExecutionException | TimeoutException e) {
++            // Portable modes remain available when a vendor probe fails.
++        }
++        return "";
+     }
+ 
+-    public static String glGetVendor(Context context) {
+-        final SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+-        String value = preferences.getString("gpu_vendor", "");
+-        if (!value.isEmpty()) return value;
++    public static String glGetRenderer(Context context) {
++        return gpuProperty(context, "renderer");
++    }
+ 
+-        ArrayMap<String, String> gpuInfo = loadGPUInformation(context);
+-        return gpuInfo.get("vendor");
++    public static String glGetVendor(Context context) {
++        return gpuProperty(context, "vendor");
+     }
+ 
+     public static String glGetVersion(Context context) {
+-        final SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+-        String value = preferences.getString("gpu_version", "");
+-        if (!value.isEmpty()) return value;
+-
+-        ArrayMap<String, String> gpuInfo = loadGPUInformation(context);
+-        return gpuInfo.get("version");
++        return gpuProperty(context, "version");
+     }
+ 
+     public static short getAdrenoModelId(Context context) {
+-        Matcher matcher = Pattern.compile("adreno[^678]*([678][0-9]{2})", Pattern.CASE_INSENSITIVE).matcher(glGetRenderer(context));
++        return adrenoModelId(glGetRenderer(context));
++    }
++
++    public static short adrenoModelId(String renderer) {
++        Matcher matcher = Pattern.compile("adreno[^0-9]*([0-9]{3})", Pattern.CASE_INSENSITIVE).matcher(renderer);
+         return (short)(matcher.find() ? Integer.parseInt(matcher.group(1)) : 0);
+     }
+ 
+diff --git a/app/src/main/java/com/winlator/core/GeneralComponents.java b/app/src/main/java/com/winlator/core/GeneralComponents.java
+index a035d2c..689d8e9 100644
+--- a/app/src/main/java/com/winlator/core/GeneralComponents.java
++++ b/app/src/main/java/com/winlator/core/GeneralComponents.java
+@@ -125,13 +125,13 @@ public abstract class GeneralComponents {
+                 items = new String[]{DefaultVersion.BOX64};
+                 break;
+             case TURNIP:
+-                items = new String[]{DefaultVersion.TURNIP};
++                items = new String[]{"24.1.0", "25.0.0", "26.0.3", DefaultVersion.TURNIP};
+                 break;
+             case DXVK:
+-                items = new String[]{DefaultVersion.MINOR_DXVK, DefaultVersion.MAJOR_DXVK};
++                items = new String[]{DefaultVersion.MINOR_DXVK, DefaultVersion.MAJOR_DXVK, DefaultVersion.MODERN_DXVK};
+                 break;
+             case VKD3D:
+-                items = new String[]{DefaultVersion.VKD3D};
++                items = new String[]{DefaultVersion.VKD3D, DefaultVersion.MODERN_VKD3D};
+                 break;
+             case WINED3D:
+                 items = new String[]{DefaultVersion.WINED3D};
+@@ -202,16 +202,16 @@ public abstract class GeneralComponents {
+         return type.getSource(context, identifier).getPath();
+     }
+ 
+-    public static void extractFile(Type type, Context context, String identifier, String defaultVersion) {
+-        extractFile(type, context, identifier, defaultVersion, null);
++    public static boolean extractFile(Type type, Context context, String identifier, String defaultVersion) {
++        return extractFile(type, context, identifier, defaultVersion, null);
+     }
+ 
+-    public static void extractFile(Type type, Context context, String identifier, String defaultVersion, TarCompressorUtils.OnExtractFileListener onExtractFileListener) {
++    public static boolean extractFile(Type type, Context context, String identifier, String defaultVersion, TarCompressorUtils.OnExtractFileListener onExtractFileListener) {
+         File destination = type.getDestination(context);
+ 
+         if (isBuiltinComponent(type, identifier)) {
+             String sourcePath = type.assetFolder()+"/"+type.lowerName()+"-"+identifier+".tzst";
+-            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context, sourcePath, destination, onExtractFileListener);
++            return TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context, sourcePath, destination, onExtractFileListener);
+         }
+         else {
+             File componentDir = getComponentDir(type, context);
+@@ -219,8 +219,9 @@ public abstract class GeneralComponents {
+             boolean success = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, source, destination, onExtractFileListener);
+             if (!success) {
+                 String sourcePath = type.assetFolder()+"/"+type.lowerName()+"-"+defaultVersion+".tzst";
+-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context, sourcePath, destination, onExtractFileListener);
++                return TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context, sourcePath, destination, onExtractFileListener);
+             }
++            return true;
+         }
+     }
+ 
+@@ -416,4 +417,4 @@ public abstract class GeneralComponents {
+             AppUtils.setSpinnerSelectionFromValue(spinner, defaultItem);
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/java/com/winlator/renderer/Texture.java b/app/src/main/java/com/winlator/renderer/Texture.java
+index fb0252f..5561b01 100644
+--- a/app/src/main/java/com/winlator/renderer/Texture.java
++++ b/app/src/main/java/com/winlator/renderer/Texture.java
+@@ -2,6 +2,7 @@ package com.winlator.renderer;
+ 
+ import android.opengl.GLES11Ext;
+ import android.opengl.GLES20;
++import android.opengl.GLES30;
+ import android.opengl.GLES32;
+ 
+ import com.winlator.xserver.Drawable;
+@@ -138,15 +139,50 @@ public class Texture {
+         return textureId;
+     }
+ 
+-    public void copyFromSource(Texture source) {
++    public boolean copyFromSource(Texture source, int[] copyFramebuffers) {
+         if (!source.isAllocated()) source.allocateTexture(source.owner.width, source.owner.height, null);
+-        if (!this.isAllocated()) this.allocateTexture(source.owner.width, source.owner.height, null);
+-        GLES32.glCopyImageSubData(
+-            source.textureId, GLES20.GL_TEXTURE_2D, 0, 0, 0, 0,
+-            this.textureId, GLES20.GL_TEXTURE_2D, 0, 0, 0, 0,
+-            source.owner.width, source.owner.height, 1
+-        );
++        if (!isAllocated()) {
++            allocateTexture(owner.width, owner.height, null);
++            if (!(this instanceof GPUImage)) {
++                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId);
++                GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8,
++                    owner.width, owner.height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
++                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
++            }
++        }
++        int width = Math.min(source.owner.width, owner.width);
++        int height = Math.min(source.owner.height, owner.height);
++        if (copyFramebuffers == null) {
++            GLES32.glCopyImageSubData(
++                source.textureId, GLES20.GL_TEXTURE_2D, 0, 0, 0, 0,
++                textureId, GLES20.GL_TEXTURE_2D, 0, 0, 0, 0,
++                width, height, 1
++            );
++        }
++        else if (!blitTexture(source.textureId, width, height, copyFramebuffers)) return false;
+         GLES20.glFlush();
++        return true;
++    }
++
++    private boolean blitTexture(int source, int width, int height, int[] framebuffers) {
++        GLES30.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, framebuffers[0]);
++        GLES30.glFramebufferTexture2D(GLES30.GL_READ_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
++            GLES20.GL_TEXTURE_2D, source, 0);
++        GLES30.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, framebuffers[1]);
++        GLES30.glFramebufferTexture2D(GLES30.GL_DRAW_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
++            GLES20.GL_TEXTURE_2D, textureId, 0);
++        boolean complete = GLES30.glCheckFramebufferStatus(GLES30.GL_READ_FRAMEBUFFER) == GLES30.GL_FRAMEBUFFER_COMPLETE &&
++            GLES30.glCheckFramebufferStatus(GLES30.GL_DRAW_FRAMEBUFFER) == GLES30.GL_FRAMEBUFFER_COMPLETE;
++        if (complete) {
++            GLES30.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
++                GLES20.GL_COLOR_BUFFER_BIT, GLES20.GL_NEAREST);
++        }
++        GLES30.glFramebufferTexture2D(GLES30.GL_READ_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
++            GLES20.GL_TEXTURE_2D, 0, 0);
++        GLES30.glFramebufferTexture2D(GLES30.GL_DRAW_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
++            GLES20.GL_TEXTURE_2D, 0, 0);
++        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
++        return complete;
+     }
+ 
+     public void copyFromReadBuffer(short width, short height) {
+diff --git a/app/src/main/java/com/winlator/xserver/extensions/PresentExtension.java b/app/src/main/java/com/winlator/xserver/extensions/PresentExtension.java
+index da06919..4884f46 100644
+--- a/app/src/main/java/com/winlator/xserver/extensions/PresentExtension.java
++++ b/app/src/main/java/com/winlator/xserver/extensions/PresentExtension.java
+@@ -2,6 +2,7 @@ package com.winlator.xserver.extensions;
+ 
+ import static com.winlator.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS;
+ 
++import android.opengl.GLES30;
+ import android.util.SparseArray;
+ 
+ import com.winlator.core.GPUHelper;
+@@ -42,6 +43,7 @@ public class PresentExtension extends Extension implements WindowManager.OnWindo
+     private final SparseArray<PresentEvent> events = new SparseArray<>();
+     private SyncExtension syncExtension;
+     private long eglContextPtr;
++    private int[] copyFramebuffers;
+     private ScheduledExecutorService idleNotifyScheduler;
+ 
+     private static abstract class ClientOpcodes {
+@@ -143,12 +145,31 @@ public class PresentExtension extends Extension implements WindowManager.OnWindo
+         }
+     }
+ 
+-    private void createCopyEGLContext(XClient client) {
++    private boolean createCopyEGLContext(XClient client) {
+         eglContextPtr = GPUHelper.createOffscreenEGLContext(true);
++        if (eglContextPtr == 0) return false;
++        int[] minor = new int[1];
++        GLES30.glGetIntegerv(GLES30.GL_MINOR_VERSION, minor, 0);
++        if (minor[0] < 2) {
++            copyFramebuffers = new int[2];
++            GLES30.glGenFramebuffers(copyFramebuffers.length, copyFramebuffers, 0);
++            if (copyFramebuffers[0] == 0 || copyFramebuffers[1] == 0) {
++                GLES30.glDeleteFramebuffers(copyFramebuffers.length, copyFramebuffers, 0);
++                copyFramebuffers = null;
++                GPUHelper.destroyOffscreenEGLContext(eglContextPtr);
++                eglContextPtr = 0;
++                return false;
++            }
++        }
+         client.addOnDestroyListener((unused) -> {
++            if (copyFramebuffers != null) {
++                GLES30.glDeleteFramebuffers(copyFramebuffers.length, copyFramebuffers, 0);
++                copyFramebuffers = null;
++            }
+             GPUHelper.destroyOffscreenEGLContext(eglContextPtr);
+             eglContextPtr = 0;
+         });
++        return true;
+     }
+ 
+     private void presentPixmap(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
+@@ -182,9 +203,9 @@ public class PresentExtension extends Extension implements WindowManager.OnWindo
+             if (pixmap != null) {
+                 Texture srcTexture = pixmap.drawable.getTexture();
+                 if (srcTexture instanceof GPUImage) {
+-                    if (eglContextPtr == 0) createCopyEGLContext(client);
++                    if (eglContextPtr == 0 && !createCopyEGLContext(client)) throw new BadMatch();
++                    if (!content.getTexture().copyFromSource(srcTexture, copyFramebuffers)) throw new BadMatch();
+                     content.setData(null);
+-                    content.getTexture().copyFromSource(srcTexture);
+                     content.forceUpdate();
+                 }
+                 else content.copyArea((short)0, (short)0, xOff, yOff, pixmap.drawable.width, pixmap.drawable.height, pixmap.drawable);
+diff --git a/app/src/main/res/layout/winblow_graphics_dialog.xml b/app/src/main/res/layout/winblow_graphics_dialog.xml
+new file mode 100644
+index 0000000..9e8d269
+--- /dev/null
++++ b/app/src/main/res/layout/winblow_graphics_dialog.xml
+@@ -0,0 +1,28 @@
++<?xml version="1.0" encoding="utf-8"?>
++<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent" android:layout_height="wrap_content">
++    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
++        android:orientation="vertical" android:padding="20dp">
++        <TextView android:id="@+id/TVGraphicsHardware" android:layout_width="match_parent"
++            android:layout_height="wrap_content" android:textColor="?attr/colorSecondaryText" />
++        <Spinner android:id="@+id/SGraphicsProfile" style="@style/ComboBox"
++            android:layout_width="match_parent" android:layout_marginTop="12dp"
++            android:contentDescription="@string/winblow_graphics_presets" />
++        <TextView android:id="@+id/TVGraphicsPreview" android:layout_width="match_parent"
++            android:layout_height="wrap_content" android:layout_marginTop="8dp"
++            android:textColor="?attr/colorSecondaryText" />
++        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
++            android:layout_marginTop="14dp" android:labelFor="@id/SGraphicsResolution"
++            android:text="@string/winblow_graphics_resolution" />
++        <Spinner android:id="@+id/SGraphicsResolution" style="@style/ComboBox"
++            android:layout_width="match_parent" android:entries="@array/winblow_graphics_resolutions" />
++        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
++            android:layout_marginTop="14dp" android:labelFor="@id/SGraphicsFrameLimit"
++            android:text="@string/winblow_graphics_frame_limit" />
++        <Spinner android:id="@+id/SGraphicsFrameLimit" style="@style/ComboBox"
++            android:layout_width="match_parent" android:entries="@array/winblow_graphics_frame_limits" />
++        <CheckBox android:id="@+id/CBGraphicsShowFPS" android:layout_width="wrap_content"
++            android:layout_height="wrap_content" android:layout_marginTop="10dp"
++            android:text="@string/winblow_graphics_show_fps" />
++    </LinearLayout>
++</ScrollView>
+diff --git a/app/src/main/res/menu/container_popup_menu.xml b/app/src/main/res/menu/container_popup_menu.xml
+index 3d5f079..a3c2776 100644
+--- a/app/src/main/res/menu/container_popup_menu.xml
++++ b/app/src/main/res/menu/container_popup_menu.xml
+@@ -2,6 +2,8 @@
+ <menu xmlns:android="http://schemas.android.com/apk/res/android">
+     <item android:id="@+id/menu_item_winblow_import" android:title="@string/winblow_import_program" />
+     <item android:id="@+id/menu_item_winblow_notepad" android:title="@string/winblow_try_notepad" />
++    <item android:id="@+id/menu_item_winblow_graphics" android:title="@string/winblow_graphics_presets" />
++    <item android:id="@+id/menu_item_winblow_safe_graphics" android:title="@string/winblow_safe_graphics" />
+     <item android:id="@+id/menu_item_file_manager" android:title="@string/file_manager" android:icon="@drawable/icon_popup_menu_file_manager" android:iconTint="?attr/colorAccent" />
+     <item android:id="@+id/menu_item_edit" android:title="@string/edit" android:icon="@drawable/icon_popup_menu_edit" android:iconTint="?attr/colorAccent" />
+     <item android:id="@+id/menu_item_duplicate" android:title="@string/duplicate" android:icon="@drawable/icon_popup_menu_duplicate" android:iconTint="?attr/colorAccent" />
+diff --git a/app/src/main/res/values/arrays.xml b/app/src/main/res/values/arrays.xml
+index 78bbfb6..5cb74fc 100644
+--- a/app/src/main/res/values/arrays.xml
++++ b/app/src/main/res/values/arrays.xml
+@@ -59,6 +59,7 @@
+     <string-array name="dxvk_framerate_entries">
+         <item>@string/zero_no_limit</item>
+         <item>30</item>
++        <item>45</item>
+         <item>60</item>
+         <item>120</item>
+     </string-array>
+diff --git a/app/src/main/res/values/winblow_strings.xml b/app/src/main/res/values/winblow_strings.xml
+index 87c6905..99ac257 100644
+--- a/app/src/main/res/values/winblow_strings.xml
++++ b/app/src/main/res/values/winblow_strings.xml
+@@ -22,4 +22,45 @@
+     <string name="winblow_downloads_ready">Open the D: drive in your desktop to use Downloads.</string>
+     <string name="winblow_downloads_denied">Downloads access is off. You can still import individual programs.</string>
+     <string name="winblow_guest_failed">Wine could not start this desktop. Check the renderer settings or enable logs in Settings.</string>
++    <string name="winblow_detecting_gpu">Checking graphics hardware…</string>
++    <string name="winblow_graphics_presets">Graphics presets</string>
++    <string name="winblow_safe_graphics">Open with safe graphics</string>
++    <string name="winblow_apply_graphics">Apply preset</string>
++    <string name="winblow_graphics_applied">Graphics settings saved for the next launch.</string>
++    <string name="winblow_graphics_compatible_fallback">The Vulkan driver needs an older DirectX translator. Using the compatible version for this launch.</string>
++    <string name="winblow_gpu_unknown">GPU name unavailable</string>
++    <string name="winblow_vulkan_unavailable">Unavailable</string>
++    <string name="winblow_graphics_hardware">%1$s\nAndroid Vulkan %2$s</string>
++    <string name="winblow_graphics_preview">Vulkan %1$s · OpenGL %2$s\n%3$s · Recommended %4$s</string>
++    <string name="winblow_graphics_resolution">Desktop resolution</string>
++    <string name="winblow_graphics_frame_limit">DXVK frame limit</string>
++    <string name="winblow_graphics_show_fps">Show FPS overlay</string>
++    <string name="winblow_startup_slow">The desktop is still starting. You can wait or open it with safe graphics.</string>
++    <string name="winblow_startup_failed">The desktop could not start with these settings.</string>
++    <string name="winblow_wait_for_desktop">Keep waiting</string>
++    <string-array name="winblow_graphics_profiles">
++        <item>Auto</item>
++        <item>Vulkan gaming</item>
++        <item>VirGL compatibility</item>
++        <item>Gladio OpenGL ES</item>
++        <item>Zink OpenGL over Vulkan</item>
++        <item>Retro DirectDraw</item>
++        <item>Safe desktop (GDI)</item>
++    </string-array>
++    <string-array name="winblow_graphics_resolutions">
++        <item>Recommended</item>
++        <item>Keep current</item>
++        <item>800×600</item>
++        <item>960×540</item>
++        <item>1280×720</item>
++        <item>1600×900</item>
++        <item>1920×1080</item>
++    </string-array>
++    <string-array name="winblow_graphics_frame_limits">
++        <item>Recommended</item>
++        <item>Unlimited</item>
++        <item>30 FPS</item>
++        <item>45 FPS</item>
++        <item>60 FPS</item>
++    </string-array>
+ </resources>

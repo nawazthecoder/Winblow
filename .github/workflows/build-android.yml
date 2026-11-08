@@ -38,11 +38,13 @@ jobs:
           printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$sdk" "$sdk" >> "$GITHUB_ENV"
       - name: Build and verify APK
         run: ./scripts/build.sh
-      - name: Test Windows program validation
-        run: bash scripts/test-program-import.sh
+      - name: Test graphics presets and Windows program validation
+        run: |
+          bash scripts/test-graphics-profiles.sh
+          bash scripts/test-program-import.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: Winblow-0.1.0-arm64
-          path: dist/Winblow-0.1.0-arm64.apk
+          name: Winblow-0.2.0-arm64
+          path: dist/Winblow-0.2.0-arm64.apk
           if-no-files-found: error
           compression-level: 0

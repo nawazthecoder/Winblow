@@ -13,7 +13,7 @@ source_dir="$(bash "$repo/scripts/prepare-source.sh")"
 )
 
 mkdir -p "$repo/dist"
-apk="$repo/dist/Winblow-0.1.0-arm64.apk"
+apk="$repo/dist/Winblow-0.2.0-arm64.apk"
 cp "$source_dir/app/build/outputs/apk/debug/app-debug.apk" "$apk"
 bash "$repo/scripts/verify-apk.sh" "$apk"
 printf '\n%s\n' "$apk"
