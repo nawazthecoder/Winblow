@@ -36,10 +36,10 @@ index b1ba334..8411b15 100644
 +                      GLESv3)
 diff --git a/app/src/main/cpp/winlator/include/graphics_bridge.h b/app/src/main/cpp/winlator/include/graphics_bridge.h
 new file mode 100644
-index 0000000..535a911
+index 0000000..50174e9
 --- /dev/null
 +++ b/app/src/main/cpp/winlator/include/graphics_bridge.h
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,33 @@
 +#ifndef WINBLOW_GRAPHICS_BRIDGE_H
 +#define WINBLOW_GRAPHICS_BRIDGE_H
 +
@@ -66,6 +66,7 @@ index 0000000..535a911
 +void wb_graphics_destroy(WBGraphicsBridge *bridge, bool context_current);
 +int wb_graphics_copy(WBGraphicsBridge *bridge, GLuint src, GLuint dst,
 +                     const WBCopyRegion *region, int mode);
++/* Copies are queued; the caller submits one fence and flush before sharing the destination. */
 +GLenum wb_graphics_error(const WBGraphicsBridge *bridge);
 +/* 1x1 RGBA sentinel, checked through an actual texture copy and glReadPixels. */
 +int wb_graphics_self_test(WBGraphicsBridge *bridge, int mode);
@@ -181,10 +182,10 @@ index b197cea..03b1aac 100644
 +}
 diff --git a/app/src/main/cpp/winlator/src/graphics_bridge.c b/app/src/main/cpp/winlator/src/graphics_bridge.c
 new file mode 100644
-index 0000000..c0db376
+index 0000000..62e94f2
 --- /dev/null
 +++ b/app/src/main/cpp/winlator/src/graphics_bridge.c
-@@ -0,0 +1,205 @@
+@@ -0,0 +1,203 @@
 +#include "graphics_bridge.h"
 +#include <EGL/egl.h>
 +#include <stdlib.h>
@@ -275,7 +276,6 @@ index 0000000..c0db376
 +                      dst, GL_TEXTURE_2D, 0, r->dst_x, r->dst_y, 0, r->width, r->height, 1);
 +        GLenum error = glGetError();
 +        if (error == GL_NO_ERROR) {
-+            glFlush();
 +            return WB_COPY_IMAGE;
 +        }
 +        b->last_error = error;
@@ -350,7 +350,6 @@ index 0000000..c0db376
 +    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, previous_draw);
 +    glBindTexture(GL_TEXTURE_2D, previous_texture);
 +    if (scissor) glEnable(GL_SCISSOR_TEST);
-+    if (result >= 0) glFlush();
 +    return result;
 +}
 +
