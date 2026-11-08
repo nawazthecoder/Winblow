@@ -18,7 +18,7 @@ from zipfile import ZipFile
 
 badging = subprocess.check_output([sys.argv[2], "dump", "badging", sys.argv[1]], text=True)
 lines = {line.rstrip() for line in badging.splitlines()}
-package = "package: name='com.winblowx' versionCode='34' versionName='0.2.0'"
+package = "package: name='com.winblowx' versionCode='35' versionName='0.3.0'"
 if not any(line.startswith(package) for line in lines):
     raise SystemExit("Unexpected Winblow package name or version")
 if "application-label:'Winblow'" not in lines or "native-code: 'arm64-v8a'" not in lines:
@@ -44,6 +44,7 @@ with ZipFile(sys.argv[1]) as apk:
         "assets/dxwrapper/dxvk-3.1.1.tzst",
         "assets/dxwrapper/vkd3d-3.1.tzst",
         "classes.dex",
+        "assets/licenses/Winblow-LGPL-2.1.txt",
     ):
         if apk.getinfo(name).file_size == 0:
             raise SystemExit(f"Empty APK member: {name}")

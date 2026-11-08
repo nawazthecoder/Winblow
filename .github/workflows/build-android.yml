@@ -38,13 +38,19 @@ jobs:
           printf 'ANDROID_HOME=%s\nANDROID_SDK_ROOT=%s\n' "$sdk" "$sdk" >> "$GITHUB_ENV"
       - name: Build and verify APK
         run: ./scripts/build.sh
-      - name: Test graphics presets and Windows program validation
+      - name: Install host graphics test libraries
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libegl1-mesa-dev libgles2-mesa-dev
+      - name: Test native graphics, presets and Windows program validation
+        run: |
+          bash scripts/test-graphics-bridge.sh
           bash scripts/test-graphics-profiles.sh
+          bash scripts/test-graphics-capabilities.sh
           bash scripts/test-program-import.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: Winblow-0.2.0-arm64
-          path: dist/Winblow-0.2.0-arm64.apk
+          name: Winblow-0.3.0-arm64
+          path: dist/Winblow-0.3.0-arm64.apk
           if-no-files-found: error
           compression-level: 0

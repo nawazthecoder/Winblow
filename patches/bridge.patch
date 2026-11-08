@@ -1,0 +1,1181 @@
+diff --git a/app/build.gradle b/app/build.gradle
+index 6c3f43e..fd37c28 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -8,8 +8,8 @@ android {
+         applicationId 'com.winblowx'
+         minSdkVersion 26
+         targetSdkVersion 28
+-        versionCode 34
+-        versionName '0.2.0'
++        versionCode 35
++        versionName '0.3.0'
+     }
+ 
+     buildTypes {
+diff --git a/app/src/main/cpp/winlator/CMakeLists.txt b/app/src/main/cpp/winlator/CMakeLists.txt
+index b1ba334..8411b15 100644
+--- a/app/src/main/cpp/winlator/CMakeLists.txt
++++ b/app/src/main/cpp/winlator/CMakeLists.txt
+@@ -10,6 +10,9 @@ add_library(winlator SHARED
+             src/drawable.c
+             src/gpu_image.c
+             src/gpu_helper.c
++            src/graphics_bridge.c
++            src/graphics_bridge_jni.c
++            src/graphics_vulkan.c
+             src/sysvshared_memory.c
+             src/xconnector_epoll.c
+             src/xinput_stream.c
+@@ -24,4 +27,4 @@ target_link_libraries(winlator
+                       jnigraphics
+                       EGL
+                       GLESv2
+-                      GLESv3)
+\ No newline at end of file
++                      GLESv3)
+diff --git a/app/src/main/cpp/winlator/include/graphics_bridge.h b/app/src/main/cpp/winlator/include/graphics_bridge.h
+new file mode 100644
+index 0000000..535a911
+--- /dev/null
++++ b/app/src/main/cpp/winlator/include/graphics_bridge.h
+@@ -0,0 +1,32 @@
++#ifndef WINBLOW_GRAPHICS_BRIDGE_H
++#define WINBLOW_GRAPHICS_BRIDGE_H
++
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <GLES3/gl32.h>
++
++/* Each bridge belongs to one EGL context. No GL objects are shared between bridges. */
++typedef struct WBGraphicsBridge WBGraphicsBridge;
++typedef struct {
++    int src_x, src_y, dst_x, dst_y, width, height;
++} WBCopyRegion;
++
++enum {
++    WB_COPY_FAILED = -1, WB_COPY_EMPTY = 0, WB_COPY_IMAGE = 1,
++    WB_COPY_BLIT = 2, WB_COPY_READBACK = 3,
++    WB_COPY_AUTO = 0, WB_FORCE_BLIT = 1, WB_FORCE_READBACK = 2
++};
++
++bool wb_copy_region(int src_width, int src_height, int dst_width, int dst_height,
++                    int x, int y, WBCopyRegion *region);
++WBGraphicsBridge *wb_graphics_create(void);
++void wb_graphics_destroy(WBGraphicsBridge *bridge, bool context_current);
++int wb_graphics_copy(WBGraphicsBridge *bridge, GLuint src, GLuint dst,
++                     const WBCopyRegion *region, int mode);
++GLenum wb_graphics_error(const WBGraphicsBridge *bridge);
++/* 1x1 RGBA sentinel, checked through an actual texture copy and glReadPixels. */
++int wb_graphics_self_test(WBGraphicsBridge *bridge, int mode);
++int wb_graphics_validate(WBGraphicsBridge *bridge);
++
++#endif
+diff --git a/app/src/main/cpp/winlator/src/gpu_helper.c b/app/src/main/cpp/winlator/src/gpu_helper.c
+index 32551eb..343cc16 100644
+--- a/app/src/main/cpp/winlator/src/gpu_helper.c
++++ b/app/src/main/cpp/winlator/src/gpu_helper.c
+@@ -198,4 +198,19 @@ Java_com_winlator_core_GPUHelper_destroyOffscreenEGLContext(JNIEnv *env, jclass
+     if (offscreen->surface != EGL_NO_SURFACE) eglDestroySurface(offscreen->display, offscreen->surface);
+     eglDestroyContext(offscreen->display, offscreen->context);
+     free(offscreen);
+-}
+\ No newline at end of file
++}
++
++JNIEXPORT jboolean JNICALL
++Java_com_winlator_core_GPUHelper_makeOffscreenEGLContextCurrent(JNIEnv *env, jclass obj, jlong ptr) {
++    if (!ptr) return JNI_FALSE;
++    OffscreenContext *c = (OffscreenContext *)ptr;
++    return eglMakeCurrent(c->display, c->surface, c->surface, c->context) ? JNI_TRUE : JNI_FALSE;
++}
++
++JNIEXPORT void JNICALL
++Java_com_winlator_core_GPUHelper_releaseOffscreenEGLContext(JNIEnv *env, jclass obj, jlong ptr) {
++    if (!ptr) return;
++    OffscreenContext *c = (OffscreenContext *)ptr;
++    if (eglGetCurrentContext() == c->context)
++        eglMakeCurrent(c->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
++}
+diff --git a/app/src/main/cpp/winlator/src/gpu_image.c b/app/src/main/cpp/winlator/src/gpu_image.c
+index b197cea..03b1aac 100644
+--- a/app/src/main/cpp/winlator/src/gpu_image.c
++++ b/app/src/main/cpp/winlator/src/gpu_image.c
+@@ -22,14 +22,15 @@
+ extern const native_handle_t* _Nullable AHardwareBuffer_getNativeHandle(const AHardwareBuffer* _Nonnull buffer);
+ 
+ int AHardwareBuffer_getFd(AHardwareBuffer* hardwareBuffer) {
++    if (!hardwareBuffer) return -1;
+     const native_handle_t* nativeHandle = AHardwareBuffer_getNativeHandle(hardwareBuffer);
+-    return nativeHandle->numFds > 0 ? nativeHandle->data[0] : -1;
++    return nativeHandle && nativeHandle->numFds > 0 ? nativeHandle->data[0] : -1;
+ }
+ 
+ EGLImageKHR createImageKHR(AHardwareBuffer* hardwareBuffer, int textureId) {
+     const EGLint attribList[] = {EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE};
+ 
+-    AHardwareBuffer_acquire(hardwareBuffer);
++    if (!hardwareBuffer || textureId <= 0) return NULL;
+ 
+     EGLClientBuffer clientBuffer = eglGetNativeClientBufferANDROID(hardwareBuffer);
+     if (!clientBuffer) return NULL;
+@@ -39,22 +40,29 @@ EGLImageKHR createImageKHR(AHardwareBuffer* hardwareBuffer, int textureId) {
+     if (!imageKHR) return NULL;
+ 
+     glBindTexture(GL_TEXTURE_2D, textureId);
++    for (int i = 0; i < 16 && glGetError() != GL_NO_ERROR; i++) {}
+     glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, imageKHR);
++    GLenum error = glGetError();
+     glBindTexture(GL_TEXTURE_2D, 0);
+-
++    if (error != GL_NO_ERROR) {
++        eglDestroyImageKHR(eglDisplay, imageKHR);
++        return NULL;
++    }
+     return imageKHR;
+ }
+ 
+ AHardwareBuffer* createHardwareBuffer(int width, int height, bool cpuAccess, bool useHALPixelFormatBGRA8888) {
++    if (width <= 0 || height <= 0) return NULL;
+     AHardwareBuffer_Desc buffDesc = {0};
+     buffDesc.width = width;
+     buffDesc.height = height;
+     buffDesc.layers = 1;
+-    buffDesc.usage = cpuAccess ? AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN : AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT;
++    buffDesc.usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE | AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT;
++    if (cpuAccess) buffDesc.usage |= AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN;
+     buffDesc.format = useHALPixelFormatBGRA8888 ? HAL_PIXEL_FORMAT_BGRA_8888 : AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+ 
+     AHardwareBuffer* hardwareBuffer = NULL;
+-    AHardwareBuffer_allocate(&buffDesc, &hardwareBuffer);
++    if (AHardwareBuffer_allocate(&buffDesc, &hardwareBuffer) != 0) return NULL;
+ 
+     return hardwareBuffer;
+ }
+@@ -104,13 +112,15 @@ JNIEXPORT jobject JNICALL
+ Java_com_winlator_renderer_GPUImage_lockHardwareBuffer(JNIEnv *env, jclass obj,
+                                                        jlong hardwareBufferPtr) {
+     AHardwareBuffer* hardwareBuffer = (AHardwareBuffer*)hardwareBufferPtr;
+-    void *virtualAddr;
+-    AHardwareBuffer_lock(hardwareBuffer, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL, &virtualAddr);
++    if (!hardwareBuffer) return NULL;
++    void *virtualAddr = NULL;
++    if (AHardwareBuffer_lock(hardwareBuffer, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN |
++        AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, NULL, &virtualAddr) != 0 || !virtualAddr) return NULL;
+ 
+     AHardwareBuffer_Desc buffDesc = {0};
+     AHardwareBuffer_describe(hardwareBuffer, &buffDesc);
+ 
+-    jlong size = buffDesc.stride * buffDesc.height * 4;
++    jlong size = (jlong)buffDesc.stride * buffDesc.height * 4;
+     return (*env)->NewDirectByteBuffer(env, virtualAddr, size);
+ }
+ 
+@@ -121,4 +131,4 @@ Java_com_winlator_renderer_GPUImage_destroyImageKHR(JNIEnv *env, jclass obj, jlo
+         EGLDisplay eglDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+         eglDestroyImageKHR(eglDisplay, imageKHR);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/cpp/winlator/src/graphics_bridge.c b/app/src/main/cpp/winlator/src/graphics_bridge.c
+new file mode 100644
+index 0000000..c0db376
+--- /dev/null
++++ b/app/src/main/cpp/winlator/src/graphics_bridge.c
+@@ -0,0 +1,205 @@
++#include "graphics_bridge.h"
++#include <EGL/egl.h>
++#include <stdlib.h>
++#include <string.h>
++
++#define WB_READBACK_LIMIT (32u * 1024u * 1024u)
++
++struct WBGraphicsBridge {
++    GLuint framebuffers[2];
++    PFNGLCOPYIMAGESUBDATAPROC copy_image;
++    bool image_failed, blit_failed;
++    unsigned char *readback;
++    size_t readback_size;
++    GLenum last_error;
++};
++
++bool wb_copy_region(int sw, int sh, int dw, int dh, int x, int y, WBCopyRegion *r) {
++    if (!r || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return false;
++    /* Work in 64 bits so even untrusted INT_MIN offsets cannot overflow. */
++    int64_t sx = x < 0 ? -(int64_t)x : 0, sy = y < 0 ? -(int64_t)y : 0;
++    int64_t dx = x > 0 ? x : 0, dy = y > 0 ? y : 0;
++    int64_t w = sw - sx, h = sh - sy;
++    if ((int64_t)dw - dx < w) w = (int64_t)dw - dx;
++    if ((int64_t)dh - dy < h) h = (int64_t)dh - dy;
++    memset(r, 0, sizeof(*r));
++    if (w <= 0 || h <= 0) return true;
++    *r = (WBCopyRegion){(int)sx, (int)sy, (int)dx, (int)dy, (int)w, (int)h};
++    return true;
++}
++
++static void clear_errors(void) {
++    /* Bound the loop in case a driver keeps reporting context loss. */
++    for (int i = 0; i < 16 && glGetError() != GL_NO_ERROR; i++) {}
++}
++
++static bool has_extension(const char *wanted) {
++    GLint count = 0;
++    glGetIntegerv(GL_NUM_EXTENSIONS, &count);
++    for (GLint i = 0; i < count; i++) {
++        const char *value = (const char *)glGetStringi(GL_EXTENSIONS, i);
++        if (value && !strcmp(value, wanted)) return true;
++    }
++    return false;
++}
++
++WBGraphicsBridge *wb_graphics_create(void) {
++    if (eglGetCurrentContext() == EGL_NO_CONTEXT) return NULL;
++    WBGraphicsBridge *b = calloc(1, sizeof(*b));
++    if (!b) return NULL;
++    clear_errors();
++    glGenFramebuffers(2, b->framebuffers);
++    if (!b->framebuffers[0] || !b->framebuffers[1] || glGetError() != GL_NO_ERROR) {
++        wb_graphics_destroy(b, true);
++        return NULL;
++    }
++    GLint major = 0, minor = 0;
++    glGetIntegerv(GL_MAJOR_VERSION, &major);
++    glGetIntegerv(GL_MINOR_VERSION, &minor);
++    if (major > 3 || (major == 3 && minor >= 2))
++        b->copy_image = (PFNGLCOPYIMAGESUBDATAPROC)eglGetProcAddress("glCopyImageSubData");
++    else if (has_extension("GL_EXT_copy_image"))
++        b->copy_image = (PFNGLCOPYIMAGESUBDATAPROC)eglGetProcAddress("glCopyImageSubDataEXT");
++    else if (has_extension("GL_OES_copy_image"))
++        b->copy_image = (PFNGLCOPYIMAGESUBDATAPROC)eglGetProcAddress("glCopyImageSubDataOES");
++    clear_errors();
++    return b;
++}
++
++void wb_graphics_destroy(WBGraphicsBridge *b, bool current) {
++    if (!b) return;
++    if (current) glDeleteFramebuffers(2, b->framebuffers);
++    free(b->readback);
++    free(b);
++}
++
++GLenum wb_graphics_error(const WBGraphicsBridge *b) {
++    return b ? b->last_error : GL_INVALID_OPERATION;
++}
++
++int wb_graphics_copy(WBGraphicsBridge *b, GLuint src, GLuint dst, const WBCopyRegion *r, int mode) {
++    if (!b || !r || !src || !dst || src == dst || r->width < 0 || r->height < 0) return WB_COPY_FAILED;
++    if (!r->width || !r->height) return WB_COPY_EMPTY;
++    int result = WB_COPY_FAILED;
++    b->last_error = GL_NO_ERROR;
++    clear_errors();
++    if (mode == WB_COPY_AUTO && b->copy_image && !b->image_failed) {
++        b->copy_image(src, GL_TEXTURE_2D, 0, r->src_x, r->src_y, 0,
++                      dst, GL_TEXTURE_2D, 0, r->dst_x, r->dst_y, 0, r->width, r->height, 1);
++        GLenum error = glGetError();
++        if (error == GL_NO_ERROR) {
++            glFlush();
++            return WB_COPY_IMAGE;
++        }
++        b->last_error = error;
++        b->image_failed = true; /* Stop retrying a broken fast path every frame. */
++    }
++
++    GLint previous_read = 0, previous_draw = 0, previous_texture = 0;
++    GLint pack = 0, unpack = 0, pack_buffer = 0, unpack_buffer = 0;
++    GLint pack_row = 0, pack_rows = 0, pack_pixels = 0, unpack_row = 0, unpack_rows = 0, unpack_pixels = 0;
++    GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
++    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previous_read);
++    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &previous_draw);
++    glGetIntegerv(GL_TEXTURE_BINDING_2D, &previous_texture);
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, b->framebuffers[0]);
++    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, src, 0);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, b->framebuffers[1]);
++    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dst, 0);
++    bool readable = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
++    bool writable = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
++    if (readable && writable && mode != WB_FORCE_READBACK && !b->blit_failed) {
++        glDisable(GL_SCISSOR_TEST);
++        glBlitFramebuffer(r->src_x, r->src_y, r->src_x + r->width, r->src_y + r->height,
++                          r->dst_x, r->dst_y, r->dst_x + r->width, r->dst_y + r->height,
++                          GL_COLOR_BUFFER_BIT, GL_NEAREST);
++        GLenum error = glGetError();
++        if (error == GL_NO_ERROR) result = WB_COPY_BLIT;
++        else { b->last_error = error; b->blit_failed = true; }
++    }
++    if (result == WB_COPY_FAILED && readable) {
++        size_t width = (size_t)r->width, height = (size_t)r->height;
++        if (width <= WB_READBACK_LIMIT / 4 && height <= WB_READBACK_LIMIT / (width * 4)) {
++            size_t bytes = width * height * 4;
++            if (bytes > b->readback_size) {
++                unsigned char *data = realloc(b->readback, bytes);
++                if (data) { b->readback = data; b->readback_size = bytes; }
++            }
++            if (b->readback_size >= bytes) {
++                glGetIntegerv(GL_PACK_ALIGNMENT, &pack); glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpack);
++                glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &pack_buffer); glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpack_buffer);
++                glGetIntegerv(GL_PACK_ROW_LENGTH, &pack_row); glGetIntegerv(GL_PACK_SKIP_ROWS, &pack_rows);
++                glGetIntegerv(GL_PACK_SKIP_PIXELS, &pack_pixels); glGetIntegerv(GL_UNPACK_ROW_LENGTH, &unpack_row);
++                glGetIntegerv(GL_UNPACK_SKIP_ROWS, &unpack_rows); glGetIntegerv(GL_UNPACK_SKIP_PIXELS, &unpack_pixels);
++                glBindBuffer(GL_PIXEL_PACK_BUFFER, 0); glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
++                glPixelStorei(GL_PACK_ALIGNMENT, 1); glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
++                glPixelStorei(GL_PACK_ROW_LENGTH, 0); glPixelStorei(GL_PACK_SKIP_ROWS, 0); glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
++                glPixelStorei(GL_UNPACK_ROW_LENGTH, 0); glPixelStorei(GL_UNPACK_SKIP_ROWS, 0); glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
++                clear_errors();
++                glReadPixels(r->src_x, r->src_y, r->width, r->height, GL_RGBA, GL_UNSIGNED_BYTE, b->readback);
++                GLenum error = glGetError();
++                if (error == GL_NO_ERROR) {
++                    glBindTexture(GL_TEXTURE_2D, dst);
++                    glTexSubImage2D(GL_TEXTURE_2D, 0, r->dst_x, r->dst_y, r->width, r->height,
++                                    GL_RGBA, GL_UNSIGNED_BYTE, b->readback);
++                    error = glGetError();
++                    if (error == GL_NO_ERROR) result = WB_COPY_READBACK;
++                }
++                if (error != GL_NO_ERROR) b->last_error = error;
++                glPixelStorei(GL_PACK_ALIGNMENT, pack); glPixelStorei(GL_UNPACK_ALIGNMENT, unpack);
++                glPixelStorei(GL_PACK_ROW_LENGTH, pack_row); glPixelStorei(GL_PACK_SKIP_ROWS, pack_rows);
++                glPixelStorei(GL_PACK_SKIP_PIXELS, pack_pixels); glPixelStorei(GL_UNPACK_ROW_LENGTH, unpack_row);
++                glPixelStorei(GL_UNPACK_SKIP_ROWS, unpack_rows); glPixelStorei(GL_UNPACK_SKIP_PIXELS, unpack_pixels);
++                glBindBuffer(GL_PIXEL_PACK_BUFFER, pack_buffer); glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpack_buffer);
++            }
++            else b->last_error = GL_OUT_OF_MEMORY;
++        }
++        else b->last_error = GL_OUT_OF_MEMORY;
++    }
++    else if (!readable || !writable) b->last_error = GL_INVALID_FRAMEBUFFER_OPERATION;
++    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
++    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, previous_read);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, previous_draw);
++    glBindTexture(GL_TEXTURE_2D, previous_texture);
++    if (scissor) glEnable(GL_SCISSOR_TEST);
++    if (result >= 0) glFlush();
++    return result;
++}
++
++int wb_graphics_self_test(WBGraphicsBridge *b, int mode) {
++    GLuint textures[2] = {0}, framebuffer = 0;
++    const unsigned char expected[4] = {37, 91, 173, 255};
++    unsigned char pixel[4] = {0};
++    glGenTextures(2, textures);
++    for (int i = 0; i < 2; i++) {
++        glBindTexture(GL_TEXTURE_2D, textures[i]);
++        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, i == 0 ? expected : pixel);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++    }
++    WBCopyRegion region = {0, 0, 0, 0, 1, 1};
++    int path = wb_graphics_copy(b, textures[0], textures[1], &region, mode);
++    glGenFramebuffers(1, &framebuffer);
++    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
++    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textures[1], 0);
++    bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
++    if (complete) glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
++    bool success = path >= 0 && complete && glGetError() == GL_NO_ERROR && !memcmp(expected, pixel, sizeof(pixel));
++    glBindFramebuffer(GL_FRAMEBUFFER, 0); glBindTexture(GL_TEXTURE_2D, 0);
++    glDeleteFramebuffers(1, &framebuffer); glDeleteTextures(2, textures);
++    return success ? path : WB_COPY_FAILED;
++}
++
++int wb_graphics_validate(WBGraphicsBridge *b) {
++    if (!b) return 0;
++    int mask = 0;
++    int path = wb_graphics_self_test(b, WB_COPY_AUTO);
++    if (path > 0) mask |= 1 << (path - 1);
++    else b->image_failed = true;
++    path = wb_graphics_self_test(b, WB_FORCE_BLIT);
++    if (path > 0) mask |= 1 << (path - 1);
++    if (path != WB_COPY_BLIT) b->blit_failed = true;
++    path = wb_graphics_self_test(b, WB_FORCE_READBACK);
++    if (path == WB_COPY_READBACK) mask |= 4;
++    return mask;
++}
+diff --git a/app/src/main/cpp/winlator/src/graphics_bridge_jni.c b/app/src/main/cpp/winlator/src/graphics_bridge_jni.c
+new file mode 100644
+index 0000000..f22c18b
+--- /dev/null
++++ b/app/src/main/cpp/winlator/src/graphics_bridge_jni.c
+@@ -0,0 +1,39 @@
++#include <jni.h>
++#include "graphics_bridge.h"
++
++JNIEXPORT jlong JNICALL
++Java_com_winlator_renderer_GraphicsBridge_nativeCreate(JNIEnv *env, jclass cls) {
++    WBGraphicsBridge *b = wb_graphics_create();
++    if (b && !wb_graphics_validate(b)) {
++        wb_graphics_destroy(b, true);
++        return 0;
++    }
++    return (jlong)b;
++}
++
++JNIEXPORT jint JNICALL
++Java_com_winlator_renderer_GraphicsBridge_nativeCopy(JNIEnv *env, jclass cls, jlong ptr,
++        jint src, jint dst, jint sw, jint sh, jint dw, jint dh, jint x, jint y) {
++    WBCopyRegion r;
++    if (!wb_copy_region(sw, sh, dw, dh, x, y, &r)) return WB_COPY_FAILED;
++    return wb_graphics_copy((WBGraphicsBridge *)ptr, src, dst, &r, WB_COPY_AUTO);
++}
++
++JNIEXPORT jint JNICALL
++Java_com_winlator_renderer_GraphicsBridge_nativeError(JNIEnv *env, jclass cls, jlong ptr) {
++    return wb_graphics_error((WBGraphicsBridge *)ptr);
++}
++
++JNIEXPORT void JNICALL
++Java_com_winlator_renderer_GraphicsBridge_nativeDestroy(JNIEnv *env, jclass cls, jlong ptr, jboolean current) {
++    wb_graphics_destroy((WBGraphicsBridge *)ptr, current);
++}
++
++JNIEXPORT jint JNICALL
++Java_com_winlator_renderer_GraphicsBridge_nativeSelfTest(JNIEnv *env, jclass cls) {
++    WBGraphicsBridge *b = wb_graphics_create();
++    if (!b) return 0;
++    int mask = wb_graphics_validate(b);
++    wb_graphics_destroy(b, true);
++    return mask;
++}
+diff --git a/app/src/main/cpp/winlator/src/graphics_vulkan.c b/app/src/main/cpp/winlator/src/graphics_vulkan.c
+new file mode 100644
+index 0000000..075f277
+--- /dev/null
++++ b/app/src/main/cpp/winlator/src/graphics_vulkan.c
+@@ -0,0 +1,80 @@
++#include <jni.h>
++#include <stdlib.h>
++#include <string.h>
++#include <dlfcn.h>
++#define VK_NO_PROTOTYPES 1
++#include <vulkan/vulkan.h>
++#include "winlator.h"
++
++/* Probe the Android Vulkan implementation used by Vortek, never a guessed GPU model. */
++JNIEXPORT jlongArray JNICALL
++Java_com_winlator_core_GPUHelper_queryVulkanCapabilities(JNIEnv *env, jclass cls) {
++    jlong values[12] = {0};
++    VkInstance instance = VK_NULL_HANDLE;
++    VkExtensionProperties *extensions = NULL;
++    PFN_vkDestroyInstance destroy = NULL;
++    void *library = dlopen(LIBVULKAN_PATH, RTLD_NOW | RTLD_LOCAL);
++    if (!library) goto done;
++    PFN_vkGetInstanceProcAddr get_proc = dlsym(library, "vkGetInstanceProcAddr");
++    PFN_vkCreateInstance create = dlsym(library, "vkCreateInstance");
++    destroy = dlsym(library, "vkDestroyInstance");
++    if (!get_proc || !create || !destroy) goto done;
++    uint32_t loader_version = VK_API_VERSION_1_0;
++    PFN_vkEnumerateInstanceVersion enumerate_version = (PFN_vkEnumerateInstanceVersion)get_proc(NULL, "vkEnumerateInstanceVersion");
++    if (enumerate_version && enumerate_version(&loader_version) != VK_SUCCESS) goto done;
++    VkApplicationInfo application = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
++        .pApplicationName = "Winblow Graphics Check",
++        .apiVersion = loader_version < VK_API_VERSION_1_2 ? loader_version : VK_API_VERSION_1_2};
++    VkInstanceCreateInfo info = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &application};
++    if (create(&info, NULL, &instance) != VK_SUCCESS) goto done;
++    PFN_vkEnumeratePhysicalDevices enumerate = (PFN_vkEnumeratePhysicalDevices)get_proc(instance, "vkEnumeratePhysicalDevices");
++    PFN_vkGetPhysicalDeviceProperties properties_fn = (PFN_vkGetPhysicalDeviceProperties)get_proc(instance, "vkGetPhysicalDeviceProperties");
++    PFN_vkGetPhysicalDeviceFeatures features_fn = (PFN_vkGetPhysicalDeviceFeatures)get_proc(instance, "vkGetPhysicalDeviceFeatures");
++    PFN_vkEnumerateDeviceExtensionProperties extensions_fn = (PFN_vkEnumerateDeviceExtensionProperties)get_proc(instance, "vkEnumerateDeviceExtensionProperties");
++    if (!enumerate || !properties_fn || !features_fn || !extensions_fn) goto done;
++    VkPhysicalDevice device = VK_NULL_HANDLE;
++    uint32_t count = 1;
++    VkResult result = enumerate(instance, &count, &device);
++    if ((result != VK_SUCCESS && result != VK_INCOMPLETE) || !count || !device) goto done;
++    VkPhysicalDeviceProperties properties;
++    VkPhysicalDeviceFeatures features;
++    properties_fn(device, &properties);
++    features_fn(device, &features);
++    values[0] = properties.apiVersion;
++    values[1] = properties.limits.maxPushConstantsSize;
++    values[2] = features.shaderInt16 == VK_TRUE;
++    values[3] = features.shaderInt64 == VK_TRUE;
++    values[8] = properties.vendorID;
++    values[9] = properties.deviceID;
++    values[10] = properties.limits.maxImageDimension2D;
++    values[11] = properties.driverVersion;
++    if (application.apiVersion >= VK_API_VERSION_1_2 && properties.apiVersion >= VK_API_VERSION_1_2) {
++        PFN_vkGetPhysicalDeviceFeatures2 query = (PFN_vkGetPhysicalDeviceFeatures2)get_proc(instance, "vkGetPhysicalDeviceFeatures2");
++        if (query) {
++            VkPhysicalDeviceVulkan12Features features12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
++            VkPhysicalDeviceFeatures2 all = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &features12};
++            query(device, &all);
++            values[4] = features12.shaderInt8 == VK_TRUE;
++            values[5] = features12.descriptorIndexing && features12.runtimeDescriptorArray &&
++                features12.descriptorBindingPartiallyBound && features12.descriptorBindingVariableDescriptorCount &&
++                features12.shaderSampledImageArrayNonUniformIndexing;
++            values[6] = features12.scalarBlockLayout == VK_TRUE;
++        }
++    }
++    count = 0;
++    if (extensions_fn(device, NULL, &count, NULL) != VK_SUCCESS || !count || count > 4096) goto done;
++    extensions = calloc(count, sizeof(*extensions));
++    if (!extensions || extensions_fn(device, NULL, &count, extensions) != VK_SUCCESS) goto done;
++    const char *required[] = {"VK_KHR_maintenance5", "VK_KHR_maintenance6", "VK_KHR_load_store_op_none",
++        "VK_EXT_depth_clip_enable", "VK_EXT_robustness2", "VK_EXT_transform_feedback"};
++    for (uint32_t i = 0; i < count; i++)
++        for (int j = 0; j < 6; j++)
++            if (!strcmp(extensions[i].extensionName, required[j])) values[7] |= 1L << j;
++done:
++    free(extensions);
++    if (instance && destroy) destroy(instance, NULL);
++    if (library) dlclose(library);
++    jlongArray array = (*env)->NewLongArray(env, 12);
++    if (array) (*env)->SetLongArrayRegion(env, array, 0, 12, values);
++    return array;
++}
+diff --git a/app/src/main/java/com/winlator/ContainersFragment.java b/app/src/main/java/com/winlator/ContainersFragment.java
+index 7fe85bc..7bfc714 100644
+--- a/app/src/main/java/com/winlator/ContainersFragment.java
++++ b/app/src/main/java/com/winlator/ContainersFragment.java
+@@ -226,6 +226,9 @@ public class ContainersFragment extends Fragment {
+                     case R.id.menu_item_winblow_notepad:
+                         activity.launchWindowsProgram(container, new File(container.getRootDir(), ".wine/drive_c/windows/notepad.exe"));
+                         break;
++                    case R.id.menu_item_winblow_graphics_check:
++                        detectGraphicsDevice(device -> com.winlator.contentdialog.GraphicsCheckDialog.show(activity, container, device));
++                        break;
+                     case R.id.menu_item_winblow_graphics:
+                         if (XServerDisplayActivity.isDesktopOpen()) {
+                             AppUtils.showToast(activity, R.string.winblow_desktop_in_use);
+diff --git a/app/src/main/java/com/winlator/XServerDisplayActivity.java b/app/src/main/java/com/winlator/XServerDisplayActivity.java
+index 5aaac54..7e60b54 100644
+--- a/app/src/main/java/com/winlator/XServerDisplayActivity.java
++++ b/app/src/main/java/com/winlator/XServerDisplayActivity.java
+@@ -583,11 +583,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
+             String turnip = graphicsDriverConfig[0].get("version", DefaultVersion.TURNIP);
+             return GPUHelper.vkMakeVersion(turnip) >= GPUHelper.vkMakeVersion(26, 0, 3);
+         }
+-        if (GraphicsDevice.vulkanVersion(this) < GPUHelper.VK_API_VERSION_1_3) return false;
+-        List<String> extensions = Arrays.asList(GPUHelper.vkGetDeviceExtensions());
+-        return extensions.containsAll(Arrays.asList("VK_KHR_maintenance5", "VK_KHR_maintenance6",
+-            "VK_KHR_load_store_op_none", "VK_EXT_depth_clip_enable", "VK_EXT_robustness2",
+-            "VK_EXT_transform_feedback"));
++        return GPUHelper.graphicsCapabilities().supportsModernDxvk();
+     }
+ 
+     private boolean supportsVulkan13() {
+diff --git a/app/src/main/java/com/winlator/container/GraphicsCapabilities.java b/app/src/main/java/com/winlator/container/GraphicsCapabilities.java
+new file mode 100644
+index 0000000..7af341a
+--- /dev/null
++++ b/app/src/main/java/com/winlator/container/GraphicsCapabilities.java
+@@ -0,0 +1,39 @@
++package com.winlator.container;
++
++import java.util.ArrayList;
++import java.util.List;
++
++/** Conservative preflight for the system Vulkan path. A passing check is not a game guarantee. */
++public final class GraphicsCapabilities {
++    public static final int VULKAN_1_3 = (1 << 22) | (3 << 12);
++    public final int apiVersion, pushConstants, maxImageDimension, extensionMask;
++    public final boolean int16, int64, int8, descriptorIndexing, scalarLayout;
++    public final long vendorId, deviceId, driverVersion;
++
++    public GraphicsCapabilities(long[] data) {
++        if (data == null || data.length != 12) data = new long[12];
++        apiVersion = (int)data[0]; pushConstants = (int)data[1];
++        int16 = data[2] != 0; int64 = data[3] != 0; int8 = data[4] != 0;
++        descriptorIndexing = data[5] != 0; scalarLayout = data[6] != 0;
++        extensionMask = (int)data[7]; vendorId = data[8]; deviceId = data[9];
++        maxImageDimension = (int)data[10]; driverVersion = data[11];
++    }
++
++    public List<String> modernDxvkBlockers() {
++        List<String> missing = new ArrayList<>();
++        if (apiVersion == 0) { missing.add("System Vulkan probe unavailable"); return missing; }
++        if (apiVersion < VULKAN_1_3) missing.add("Vulkan 1.3 or later");
++        if (pushConstants < 256) missing.add("256-byte push constants");
++        if (!int8) missing.add("8-bit shader integers");
++        if (!int16) missing.add("16-bit shader integers");
++        if (!int64) missing.add("64-bit shader integers");
++        if (!descriptorIndexing) missing.add("Descriptor indexing");
++        if (!scalarLayout) missing.add("Scalar block layout");
++        String[] names = {"VK_KHR_maintenance5", "VK_KHR_maintenance6", "VK_KHR_load_store_op_none",
++            "VK_EXT_depth_clip_enable", "VK_EXT_robustness2", "VK_EXT_transform_feedback"};
++        for (int i = 0; i < names.length; i++) if ((extensionMask & (1 << i)) == 0) missing.add(names[i]);
++        return missing;
++    }
++
++    public boolean supportsModernDxvk() { return modernDxvkBlockers().isEmpty(); }
++}
+diff --git a/app/src/main/java/com/winlator/container/GraphicsDevice.java b/app/src/main/java/com/winlator/container/GraphicsDevice.java
+index 5d94c04..accec36 100644
+--- a/app/src/main/java/com/winlator/container/GraphicsDevice.java
++++ b/app/src/main/java/com/winlator/container/GraphicsDevice.java
+@@ -30,6 +30,13 @@ public final class GraphicsDevice {
+     }
+ 
+     public static int vulkanVersion(Context context) {
++        int advertised = advertisedVulkanVersion(context);
++        if (advertised == 0) return 0;
++        int probed = GPUHelper.graphicsCapabilities().apiVersion;
++        return Math.min(advertised, probed);
++    }
++
++    public static int advertisedVulkanVersion(Context context) {
+         FeatureInfo[] features = context.getPackageManager().getSystemAvailableFeatures();
+         if (features == null) return 0;
+         for (FeatureInfo feature : features) {
+diff --git a/app/src/main/java/com/winlator/contentdialog/GraphicsCheckDialog.java b/app/src/main/java/com/winlator/contentdialog/GraphicsCheckDialog.java
+new file mode 100644
+index 0000000..07da796
+--- /dev/null
++++ b/app/src/main/java/com/winlator/contentdialog/GraphicsCheckDialog.java
+@@ -0,0 +1,106 @@
++package com.winlator.contentdialog;
++
++import android.app.Activity;
++import android.content.ClipData;
++import android.content.ClipboardManager;
++import android.content.Context;
++import android.os.Build;
++import android.os.Handler;
++import android.os.Looper;
++import android.widget.ScrollView;
++import android.widget.TextView;
++import androidx.appcompat.app.AlertDialog;
++import com.winlator.R;
++import com.winlator.container.Container;
++import com.winlator.container.GraphicsCapabilities;
++import com.winlator.container.GraphicsDevice;
++import com.winlator.container.GraphicsProfile;
++import com.winlator.core.GPUHelper;
++import com.winlator.renderer.GraphicsBridge;
++import org.json.JSONArray;
++import org.json.JSONObject;
++
++public final class GraphicsCheckDialog {
++    private static String version(int value) {
++        return value == 0 ? "unavailable" : GPUHelper.vkVersionMajor(value)+"."+
++            GPUHelper.vkVersionMinor(value)+"."+GPUHelper.vkVersionPatch(value);
++    }
++
++    private static String report(Activity activity, Container container, GraphicsDevice device) throws Exception {
++        GraphicsCapabilities caps = GPUHelper.graphicsCapabilities();
++        int modes = GraphicsBridge.checkedModes();
++        GraphicsProfile.Settings recommended = device.resolve(GraphicsProfile.AUTO, GraphicsProfile.RECOMMENDED_FRAME_CAP);
++        JSONObject result = new JSONObject();
++        result.put("winblowVersion", "0.3.0");
++        result.put("androidVersion", Build.VERSION.RELEASE);
++        result.put("gpu", device.renderer);
++        result.put("lowMemoryPreset", device.lowMemory);
++        result.put("advertisedVulkan", version(GraphicsDevice.advertisedVulkanVersion(activity)));
++        result.put("probedSystemVulkan", version(caps.apiVersion));
++        result.put("systemDriverVersionRaw", caps.driverVersion);
++        result.put("pushConstantBytes", caps.pushConstants);
++        result.put("maximumTextureDimension", caps.maxImageDimension);
++        result.put("systemDxvk3PreflightMissing", new JSONArray(caps.modernDxvkBlockers()));
++        result.put("copyCheckCompleted", modes >= 0);
++        result.put("imageCopyPassed", modes >= 0 && (modes & 1) != 0);
++        result.put("framebufferCopyPassed", modes >= 0 && (modes & 2) != 0);
++        result.put("readbackCopyPassed", modes >= 0 && (modes & 4) != 0);
++        result.put("selectedDrivers", container.getGraphicsDriver());
++        result.put("selectedDirectXTranslator", container.getDXWrapper());
++        result.put("selectedResolution", container.getScreenSize());
++        result.put("recommendedDrivers", recommended.drivers);
++        result.put("recommendedDirectXTranslator", recommended.wrapper);
++        result.put("copyCountersThisProcess", GraphicsBridge.statistics());
++        result.put("scope", "Copy checks cover the Android compositor. Vulkan preflight covers the system driver used by Vortek. Custom Turnip and Windows game compatibility require guest testing.");
++        return result.toString(2);
++    }
++
++    public static void show(Activity activity, Container container, GraphicsDevice device) {
++        AlertDialog progress = new AlertDialog.Builder(activity)
++            .setTitle(R.string.winblow_graphics_check)
++            .setMessage(R.string.winblow_graphics_check_running)
++            .setNegativeButton(android.R.string.cancel, null).create();
++        Handler ui = new Handler(Looper.getMainLooper());
++        Runnable timeout = () -> {
++            if (progress.isShowing()) {
++                progress.dismiss();
++                showReport(activity, activity.getString(R.string.winblow_graphics_check_timeout));
++            }
++        };
++        progress.setOnDismissListener(unused -> ui.removeCallbacks(timeout));
++        progress.show();
++        ui.postDelayed(timeout, 6000);
++        Thread worker = new Thread(() -> {
++            String value;
++            try { value = report(activity, container, device); }
++            catch (Exception e) { value = activity.getString(R.string.winblow_graphics_check_failed); }
++            final String text = value;
++            ui.post(() -> {
++                if (progress.isShowing()) {
++                    progress.dismiss();
++                    showReport(activity, text);
++                }
++            });
++        }, "winblow-graphics-report");
++        worker.setDaemon(true);
++        worker.start();
++    }
++
++    private static void showReport(Activity activity, String report) {
++        if (activity.isFinishing() || activity.isDestroyed()) return;
++        ScrollView scroll = new ScrollView(activity);
++        TextView text = new TextView(activity);
++        int pad = (int)(20 * activity.getResources().getDisplayMetrics().density);
++        text.setPadding(pad, pad, pad, pad);
++        text.setText(report);
++        text.setTextSize(12);
++        text.setTextIsSelectable(true);
++        scroll.addView(text);
++        new AlertDialog.Builder(activity).setTitle(R.string.winblow_graphics_check)
++            .setView(scroll).setPositiveButton(android.R.string.ok, null)
++            .setNeutralButton(R.string.winblow_copy_report, (dialog, button) -> {
++                ClipboardManager clipboard = (ClipboardManager)activity.getSystemService(Context.CLIPBOARD_SERVICE);
++                if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("Winblow graphics report", report));
++            }).show();
++    }
++}
+diff --git a/app/src/main/java/com/winlator/core/GPUHelper.java b/app/src/main/java/com/winlator/core/GPUHelper.java
+index 57b323d..7dda6db 100644
+--- a/app/src/main/java/com/winlator/core/GPUHelper.java
++++ b/app/src/main/java/com/winlator/core/GPUHelper.java
+@@ -12,6 +12,7 @@ import android.os.Build;
+ 
+ import androidx.collection.ArrayMap;
+ import androidx.preference.PreferenceManager;
++import com.winlator.container.GraphicsCapabilities;
+ 
+ import java.util.Locale;
+ import java.util.Objects;
+@@ -39,6 +40,24 @@ public abstract class GPUHelper {
+     }
+ 
+     private static FutureTask<ArrayMap<String, String>> gpuProbe;
++    private static FutureTask<GraphicsCapabilities> vulkanProbe;
++
++    private static synchronized FutureTask<GraphicsCapabilities> startVulkanProbe() {
++        if (vulkanProbe == null) {
++            vulkanProbe = new FutureTask<>(() -> new GraphicsCapabilities(queryVulkanCapabilities()));
++            Thread worker = new Thread(vulkanProbe, "winblow-vulkan-probe");
++            worker.setDaemon(true);
++            worker.start();
++        }
++        return vulkanProbe;
++    }
++
++    public static GraphicsCapabilities graphicsCapabilities() {
++        try { return startVulkanProbe().get(2, TimeUnit.SECONDS); }
++        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
++        catch (ExecutionException | TimeoutException e) { /* Unknown capabilities select the portable path. */ }
++        return new GraphicsCapabilities(null);
++    }
+ 
+     private static ArrayMap<String, String> probeEGL() {
+         ArrayMap<String, String> result = new ArrayMap<>();
+@@ -177,4 +196,7 @@ public abstract class GPUHelper {
+     public static native long createOffscreenEGLContext(boolean sharedContext);
+ 
+     public static native void destroyOffscreenEGLContext(long contextPtr);
++    public static native boolean makeOffscreenEGLContextCurrent(long contextPtr);
++    public static native void releaseOffscreenEGLContext(long contextPtr);
++    private static native long[] queryVulkanCapabilities();
+ }
+diff --git a/app/src/main/java/com/winlator/renderer/GPUImage.java b/app/src/main/java/com/winlator/renderer/GPUImage.java
+index 048f888..4a85162 100644
+--- a/app/src/main/java/com/winlator/renderer/GPUImage.java
++++ b/app/src/main/java/com/winlator/renderer/GPUImage.java
+@@ -13,7 +13,7 @@ public class GPUImage extends Texture {
+     private ByteBuffer virtualData;
+     private short stride;
+     private boolean locked = false;
+-    private int nativeHandle;
++    private int nativeHandle = -1;
+ 
+     static {
+         System.loadLibrary("winlator");
+@@ -32,19 +32,21 @@ public class GPUImage extends Texture {
+         hardwareBufferPtr = createHardwareBuffer(owner.width, owner.height, cpuAccess, useHALPixelFormatBGRA8888);
+         if (cpuAccess && hardwareBufferPtr != 0) {
+             virtualData = lockHardwareBuffer(hardwareBufferPtr);
+-            locked = true;
++            locked = virtualData != null;
+         }
+     }
+ 
+     @Override
+     public void allocateTexture(short width, short height, ByteBuffer data) {
+-        if (isAllocated()) return;
++        if (isAllocated() || hardwareBufferPtr == 0) return;
+         super.allocateTexture(width, height, null);
+         imageKHRPtr = createImageKHR(hardwareBufferPtr, textureId);
++        if (imageKHRPtr == 0) super.destroy();
+     }
+ 
+     @Override
+     public void updateFromDrawable() {
++        waitForCopy();
+         if (!isAllocated() && owner != null) allocateTexture(owner.width, owner.height, null);
+         needsUpdate = false;
+     }
+@@ -88,8 +90,12 @@ public class GPUImage extends Texture {
+     public static GPUImage createOrObtain(XServer xServer, Drawable drawable, boolean cpuAccess, boolean useHALPixelFormatBGRA8888) {
+         final Texture texture = drawable.getTexture();
+         if (!(texture instanceof GPUImage)) {
+-            xServer.getRenderer().xServerView.queueEvent(texture::destroy);
+             GPUImage gpuImage = new GPUImage(drawable, cpuAccess, useHALPixelFormatBGRA8888);
++            if (gpuImage.hardwareBufferPtr == 0 || (cpuAccess && gpuImage.virtualData == null)) {
++                gpuImage.destroy();
++                return null;
++            }
++            xServer.getRenderer().xServerView.queueEvent(texture::destroy);
+             drawable.setTexture(gpuImage);
+             return gpuImage;
+         }
+@@ -105,4 +111,4 @@ public class GPUImage extends Texture {
+     private native long createImageKHR(long hardwareBufferPtr, int textureId);
+ 
+     private native void destroyImageKHR(long imageKHRPtr);
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/java/com/winlator/renderer/GraphicsBridge.java b/app/src/main/java/com/winlator/renderer/GraphicsBridge.java
+new file mode 100644
+index 0000000..1c6a46e
+--- /dev/null
++++ b/app/src/main/java/com/winlator/renderer/GraphicsBridge.java
+@@ -0,0 +1,92 @@
++package com.winlator.renderer;
++
++import com.winlator.core.GPUHelper;
++import java.util.concurrent.atomic.AtomicLongArray;
++import java.util.concurrent.FutureTask;
++import java.util.concurrent.TimeUnit;
++
++/** Winblow-owned presentation bridge; all GL objects belong to one client's context. */
++public final class GraphicsBridge implements AutoCloseable {
++    private long context;
++    private long nativePtr;
++    private static final AtomicLongArray counters = new AtomicLongArray(5);
++    private static volatile int lastError;
++    private static FutureTask<Integer> testTask;
++
++    static { System.loadLibrary("winlator"); }
++
++    private GraphicsBridge(long context, long nativePtr) {
++        this.context = context;
++        this.nativePtr = nativePtr;
++    }
++
++    public static GraphicsBridge create() {
++        long context = GPUHelper.createOffscreenEGLContext(true);
++        if (context == 0) return null;
++        long ptr = nativeCreate();
++        GPUHelper.releaseOffscreenEGLContext(context);
++        if (ptr == 0) {
++            GPUHelper.destroyOffscreenEGLContext(context);
++            return null;
++        }
++        return new GraphicsBridge(context, ptr);
++    }
++
++    public boolean begin() {
++        return context != 0 && GPUHelper.makeOffscreenEGLContextCurrent(context);
++    }
++
++    public void end() {
++        if (context != 0) GPUHelper.releaseOffscreenEGLContext(context);
++    }
++
++    public boolean copy(int src, int dst, int sw, int sh, int dw, int dh, int x, int y) {
++        int path = nativeCopy(nativePtr, src, dst, sw, sh, dw, dh, x, y);
++        counters.incrementAndGet(path >= 0 && path <= 3 ? path : 4);
++        if (path < 0) lastError = nativeError(nativePtr);
++        return path >= 0;
++    }
++
++    @Override
++    public void close() {
++        if (context == 0) return;
++        boolean current = begin();
++        nativeDestroy(nativePtr, current);
++        nativePtr = 0;
++        GPUHelper.destroyOffscreenEGLContext(context);
++        context = 0;
++    }
++
++    /** Uses a separate unshared context so the check can run outside a desktop. */
++    public static int selfTest() {
++        long context = GPUHelper.createOffscreenEGLContext(false);
++        if (context == 0) return 0;
++        try { return nativeSelfTest(); }
++        finally { GPUHelper.destroyOffscreenEGLContext(context); }
++    }
++
++    public static synchronized int checkedModes() {
++        if (testTask == null) {
++            testTask = new FutureTask<>(GraphicsBridge::selfTest);
++            Thread worker = new Thread(testTask, "winblow-copy-self-test");
++            worker.setDaemon(true);
++            worker.start();
++        }
++        try { return testTask.get(2, TimeUnit.SECONDS); }
++        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
++        catch (Exception e) { /* A failed or slow vendor check never blocks desktop creation. */ }
++        return -1;
++    }
++
++    public static String statistics() {
++        return "Image copies: "+counters.get(1)+"\nFramebuffer blits: "+counters.get(2)+
++            "\nCPU readbacks: "+counters.get(3)+"\nFailed copies: "+counters.get(4)+
++            "\nLast copy error: 0x"+Integer.toHexString(lastError);
++    }
++
++    private static native long nativeCreate();
++    private static native int nativeCopy(long ptr, int src, int dst, int sw, int sh, int dw, int dh, int x, int y);
++    private static native int nativeError(long ptr);
++    private static native void nativeDestroy(long ptr, boolean current);
++    private static native int nativeSelfTest();
++}
+diff --git a/app/src/main/java/com/winlator/renderer/Texture.java b/app/src/main/java/com/winlator/renderer/Texture.java
+index 5561b01..0f8aedf 100644
+--- a/app/src/main/java/com/winlator/renderer/Texture.java
++++ b/app/src/main/java/com/winlator/renderer/Texture.java
+@@ -3,11 +3,11 @@ package com.winlator.renderer;
+ import android.opengl.GLES11Ext;
+ import android.opengl.GLES20;
+ import android.opengl.GLES30;
+-import android.opengl.GLES32;
+ 
+ import com.winlator.xserver.Drawable;
+ 
+ import java.nio.ByteBuffer;
++import java.util.concurrent.atomic.AtomicLong;
+ 
+ public class Texture {
+     protected int textureId = 0;
+@@ -19,6 +19,7 @@ public class Texture {
+     protected boolean needsUpdate = true;
+     private boolean flipY = false;
+     protected Drawable owner;
++    private final AtomicLong pendingCopyFence = new AtomicLong();
+ 
+     public Texture(Drawable owner) {
+         this.owner = owner;
+@@ -117,6 +118,7 @@ public class Texture {
+     }
+ 
+     public void updateFromDrawable() {
++        waitForCopy();
+         if (owner == null || owner.getData() == null) return;
+ 
+         ByteBuffer data = owner.getData();
+@@ -139,7 +141,7 @@ public class Texture {
+         return textureId;
+     }
+ 
+-    public boolean copyFromSource(Texture source, int[] copyFramebuffers) {
++    public boolean copyFromSource(Texture source, GraphicsBridge bridge, int x, int y) {
+         if (!source.isAllocated()) source.allocateTexture(source.owner.width, source.owner.height, null);
+         if (!isAllocated()) {
+             allocateTexture(owner.width, owner.height, null);
+@@ -150,39 +152,22 @@ public class Texture {
+                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
+             }
+         }
+-        int width = Math.min(source.owner.width, owner.width);
+-        int height = Math.min(source.owner.height, owner.height);
+-        if (copyFramebuffers == null) {
+-            GLES32.glCopyImageSubData(
+-                source.textureId, GLES20.GL_TEXTURE_2D, 0, 0, 0, 0,
+-                textureId, GLES20.GL_TEXTURE_2D, 0, 0, 0, 0,
+-                width, height, 1
+-            );
+-        }
+-        else if (!blitTexture(source.textureId, width, height, copyFramebuffers)) return false;
++        if (!source.isAllocated() || !isAllocated() || !bridge.copy(source.textureId, textureId,
++            source.owner.width, source.owner.height, owner.width, owner.height, x, y)) return false;
++        long fence = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
++        if (fence == 0) GLES20.glFinish();
++        long previous = pendingCopyFence.getAndSet(fence);
++        if (previous != 0) GLES30.glDeleteSync(previous);
+         GLES20.glFlush();
+         return true;
+     }
+ 
+-    private boolean blitTexture(int source, int width, int height, int[] framebuffers) {
+-        GLES30.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, framebuffers[0]);
+-        GLES30.glFramebufferTexture2D(GLES30.GL_READ_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+-            GLES20.GL_TEXTURE_2D, source, 0);
+-        GLES30.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, framebuffers[1]);
+-        GLES30.glFramebufferTexture2D(GLES30.GL_DRAW_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+-            GLES20.GL_TEXTURE_2D, textureId, 0);
+-        boolean complete = GLES30.glCheckFramebufferStatus(GLES30.GL_READ_FRAMEBUFFER) == GLES30.GL_FRAMEBUFFER_COMPLETE &&
+-            GLES30.glCheckFramebufferStatus(GLES30.GL_DRAW_FRAMEBUFFER) == GLES30.GL_FRAMEBUFFER_COMPLETE;
+-        if (complete) {
+-            GLES30.glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+-                GLES20.GL_COLOR_BUFFER_BIT, GLES20.GL_NEAREST);
++    protected void waitForCopy() {
++        long fence = pendingCopyFence.getAndSet(0);
++        if (fence != 0) {
++            GLES30.glWaitSync(fence, 0, GLES30.GL_TIMEOUT_IGNORED);
++            GLES30.glDeleteSync(fence);
+         }
+-        GLES30.glFramebufferTexture2D(GLES30.GL_READ_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+-            GLES20.GL_TEXTURE_2D, 0, 0);
+-        GLES30.glFramebufferTexture2D(GLES30.GL_DRAW_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+-            GLES20.GL_TEXTURE_2D, 0, 0);
+-        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
+-        return complete;
+     }
+ 
+     public void copyFromReadBuffer(short width, short height) {
+@@ -194,6 +179,8 @@ public class Texture {
+     }
+ 
+     public void destroy() {
++        long fence = pendingCopyFence.getAndSet(0);
++        if (fence != 0) GLES30.glDeleteSync(fence);
+         if (textureId > 0) {
+             int[] textureIds = new int[]{textureId};
+             GLES20.glDeleteTextures(textureIds.length, textureIds, 0);
+diff --git a/app/src/main/java/com/winlator/xenvironment/components/VortekRendererComponent.java b/app/src/main/java/com/winlator/xenvironment/components/VortekRendererComponent.java
+index 8f9b7e5..e4e6f8f 100644
+--- a/app/src/main/java/com/winlator/xenvironment/components/VortekRendererComponent.java
++++ b/app/src/main/java/com/winlator/xenvironment/components/VortekRendererComponent.java
+@@ -112,7 +112,7 @@ public class VortekRendererComponent extends EnvironmentComponent implements Con
+         Window window = xServer.windowManager.getWindow(windowId);
+         if (window != null) {
+             GPUImage texture = GPUImage.createOrObtain(xServer, window.getContent(), false, useHALPixelFormatBGRA8888);
+-            return texture.getHardwareBufferPtr();
++            return texture != null ? texture.getHardwareBufferPtr() : 0;
+         }
+         return 0;
+     }
+diff --git a/app/src/main/java/com/winlator/xserver/extensions/DRI3Extension.java b/app/src/main/java/com/winlator/xserver/extensions/DRI3Extension.java
+index 30de101..5a1b78c 100644
+--- a/app/src/main/java/com/winlator/xserver/extensions/DRI3Extension.java
++++ b/app/src/main/java/com/winlator/xserver/extensions/DRI3Extension.java
+@@ -114,6 +114,7 @@ public class DRI3Extension extends Extension {
+         else content = window.getContent();
+ 
+         GPUImage texture = GPUImage.createOrObtain(xServer, content, false, true);
++        if (texture == null || texture.getNativeHandle() < 0) throw new BadMatch();
+         short stride = texture.getStride();
+         int nativeHandle = texture.getNativeHandle();
+ 
+diff --git a/app/src/main/java/com/winlator/xserver/extensions/PresentExtension.java b/app/src/main/java/com/winlator/xserver/extensions/PresentExtension.java
+index 4884f46..7f8abfe 100644
+--- a/app/src/main/java/com/winlator/xserver/extensions/PresentExtension.java
++++ b/app/src/main/java/com/winlator/xserver/extensions/PresentExtension.java
+@@ -2,11 +2,11 @@ package com.winlator.xserver.extensions;
+ 
+ import static com.winlator.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS;
+ 
+-import android.opengl.GLES30;
+ import android.util.SparseArray;
+ 
+ import com.winlator.core.GPUHelper;
+ import com.winlator.renderer.GPUImage;
++import com.winlator.renderer.GraphicsBridge;
+ import com.winlator.renderer.Texture;
+ import com.winlator.xconnector.XInputStream;
+ import com.winlator.xconnector.XOutputStream;
+@@ -30,6 +30,7 @@ import com.winlator.xserver.events.PresentConfigureNotify;
+ import com.winlator.xserver.events.PresentIdleNotify;
+ 
+ import java.io.IOException;
++import java.util.IdentityHashMap;
+ import java.util.concurrent.Executors;
+ import java.util.concurrent.ScheduledExecutorService;
+ import java.util.concurrent.TimeUnit;
+@@ -42,8 +43,7 @@ public class PresentExtension extends Extension implements WindowManager.OnWindo
+     private static final byte FLAG_WINDOW_DESTROYED = (1<<0);
+     private final SparseArray<PresentEvent> events = new SparseArray<>();
+     private SyncExtension syncExtension;
+-    private long eglContextPtr;
+-    private int[] copyFramebuffers;
++    private final IdentityHashMap<XClient, GraphicsBridge> bridges = new IdentityHashMap<>();
+     private ScheduledExecutorService idleNotifyScheduler;
+ 
+     private static abstract class ClientOpcodes {
+@@ -145,31 +145,21 @@ public class PresentExtension extends Extension implements WindowManager.OnWindo
+         }
+     }
+ 
+-    private boolean createCopyEGLContext(XClient client) {
+-        eglContextPtr = GPUHelper.createOffscreenEGLContext(true);
+-        if (eglContextPtr == 0) return false;
+-        int[] minor = new int[1];
+-        GLES30.glGetIntegerv(GLES30.GL_MINOR_VERSION, minor, 0);
+-        if (minor[0] < 2) {
+-            copyFramebuffers = new int[2];
+-            GLES30.glGenFramebuffers(copyFramebuffers.length, copyFramebuffers, 0);
+-            if (copyFramebuffers[0] == 0 || copyFramebuffers[1] == 0) {
+-                GLES30.glDeleteFramebuffers(copyFramebuffers.length, copyFramebuffers, 0);
+-                copyFramebuffers = null;
+-                GPUHelper.destroyOffscreenEGLContext(eglContextPtr);
+-                eglContextPtr = 0;
+-                return false;
+-            }
++    private GraphicsBridge bridgeFor(XClient client) {
++        synchronized (bridges) {
++            GraphicsBridge bridge = bridges.get(client);
++            if (bridge != null) return bridge;
++            bridge = GraphicsBridge.create();
++            if (bridge == null) return null;
++            bridges.put(client, bridge);
++            client.addOnDestroyListener(unused -> {
++                synchronized (bridges) {
++                    GraphicsBridge removed = bridges.remove(client);
++                    if (removed != null) removed.close();
++                }
++            });
++            return bridge;
+         }
+-        client.addOnDestroyListener((unused) -> {
+-            if (copyFramebuffers != null) {
+-                GLES30.glDeleteFramebuffers(copyFramebuffers.length, copyFramebuffers, 0);
+-                copyFramebuffers = null;
+-            }
+-            GPUHelper.destroyOffscreenEGLContext(eglContextPtr);
+-            eglContextPtr = 0;
+-        });
+-        return true;
+     }
+ 
+     private void presentPixmap(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
+@@ -203,8 +193,12 @@ public class PresentExtension extends Extension implements WindowManager.OnWindo
+             if (pixmap != null) {
+                 Texture srcTexture = pixmap.drawable.getTexture();
+                 if (srcTexture instanceof GPUImage) {
+-                    if (eglContextPtr == 0 && !createCopyEGLContext(client)) throw new BadMatch();
+-                    if (!content.getTexture().copyFromSource(srcTexture, copyFramebuffers)) throw new BadMatch();
++                    GraphicsBridge bridge = bridgeFor(client);
++                    if (bridge == null || !bridge.begin()) throw new BadMatch();
++                    try {
++                        if (!content.getTexture().copyFromSource(srcTexture, bridge, xOff, yOff)) throw new BadMatch();
++                    }
++                    finally { bridge.end(); }
+                     content.setData(null);
+                     content.forceUpdate();
+                 }
+diff --git a/app/src/main/res/menu/container_popup_menu.xml b/app/src/main/res/menu/container_popup_menu.xml
+index a3c2776..ecb9e2c 100644
+--- a/app/src/main/res/menu/container_popup_menu.xml
++++ b/app/src/main/res/menu/container_popup_menu.xml
+@@ -3,6 +3,7 @@
+     <item android:id="@+id/menu_item_winblow_import" android:title="@string/winblow_import_program" />
+     <item android:id="@+id/menu_item_winblow_notepad" android:title="@string/winblow_try_notepad" />
+     <item android:id="@+id/menu_item_winblow_graphics" android:title="@string/winblow_graphics_presets" />
++    <item android:id="@+id/menu_item_winblow_graphics_check" android:title="@string/winblow_graphics_check" />
+     <item android:id="@+id/menu_item_winblow_safe_graphics" android:title="@string/winblow_safe_graphics" />
+     <item android:id="@+id/menu_item_file_manager" android:title="@string/file_manager" android:icon="@drawable/icon_popup_menu_file_manager" android:iconTint="?attr/colorAccent" />
+     <item android:id="@+id/menu_item_edit" android:title="@string/edit" android:icon="@drawable/icon_popup_menu_edit" android:iconTint="?attr/colorAccent" />
+diff --git a/app/src/main/res/values/winblow_strings.xml b/app/src/main/res/values/winblow_strings.xml
+index 99ac257..b407930 100644
+--- a/app/src/main/res/values/winblow_strings.xml
++++ b/app/src/main/res/values/winblow_strings.xml
+@@ -24,6 +24,11 @@
+     <string name="winblow_guest_failed">Wine could not start this desktop. Check the renderer settings or enable logs in Settings.</string>
+     <string name="winblow_detecting_gpu">Checking graphics hardware…</string>
+     <string name="winblow_graphics_presets">Graphics presets</string>
++    <string name="winblow_graphics_check">Graphics check</string>
++    <string name="winblow_graphics_check_running">Checking the driver and copying test pixels…</string>
++    <string name="winblow_graphics_check_timeout">The driver did not finish the graphics check. Try Auto or Safe desktop in Graphics presets.</string>
++    <string name="winblow_graphics_check_failed">The graphics report could not be created. Try Auto or Safe desktop in Graphics presets.</string>
++    <string name="winblow_copy_report">Copy report</string>
+     <string name="winblow_safe_graphics">Open with safe graphics</string>
+     <string name="winblow_apply_graphics">Apply preset</string>
+     <string name="winblow_graphics_applied">Graphics settings saved for the next launch.</string>

@@ -84,6 +84,9 @@ def main():
     parser.add_argument("cache", type=Path)
     args = parser.parse_args()
     args.cache.mkdir(parents=True, exist_ok=True)
+    licenses = args.assets / "licenses"
+    licenses.mkdir(exist_ok=True)
+    shutil.copyfile(args.assets.parents[3] / "LICENSE", licenses / "Winblow-LGPL-2.1.txt")
     for version, digest in TURNIP.items():
         name = f"turnip-{version}.tzst"
         shutil.copyfile(fetch(args.cache, f"{TURNIP_BASE}/{name}", digest),

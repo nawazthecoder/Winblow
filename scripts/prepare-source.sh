@@ -7,7 +7,8 @@ upstream="$build/upstream.git"
 revision=2c33741d50c5daab0521a098be5c969f63b9e887
 patch="$repo/patches/winblow.patch"
 graphics_patch="$repo/patches/graphics.patch"
-digest="$( { printf '%s\n' "$revision"; cat "$patch" "$graphics_patch" "$repo/scripts/prepare-runtime.py" "$repo/scripts/prepare-graphics.py"; } | sha256sum | cut -c1-16 )"
+bridge_patch="$repo/patches/bridge.patch"
+digest="$( { printf '%s\n' "$revision"; cat "$patch" "$graphics_patch" "$bridge_patch" "$repo/scripts/prepare-runtime.py" "$repo/scripts/prepare-graphics.py"; } | sha256sum | cut -c1-16 )"
 source_dir="$build/engine-$digest"
 
 mkdir -p "$build"
@@ -33,6 +34,8 @@ git -C "$stage" apply --check "$patch"
 git -C "$stage" apply "$patch"
 git -C "$stage" apply --check "$graphics_patch"
 git -C "$stage" apply "$graphics_patch"
+git -C "$stage" apply --check "$bridge_patch"
+git -C "$stage" apply "$bridge_patch"
 python3 "$repo/scripts/prepare-graphics.py" "$stage/app/src/main/assets" "$build/graphics-downloads" >&2
 python3 "$repo/scripts/prepare-runtime.py" "$stage/app/src/main/assets" >&2
 mv -- "$stage" "$source_dir"

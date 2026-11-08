@@ -31,7 +31,13 @@ The Redmi 13C 5G starts with VirGL and WineD3D at 960×540 under Auto. Lower-mem
 
 Advanced editing exposes Turnip 24.1.0, 25.0.0, 26.0.3, and 26.2.0, DXVK 1.10.3, 2.4.1, and 3.1.1, plus VKD3D-Proton 2.14.1 and 3.1. Newer translators are opt-in and depend on the Vulkan features exposed by the selected driver. The launch checks choose an older translator when a known requirement is missing. [DXVK requirements](https://github.com/doitsujin/dxvk/wiki/Driver-support)
 
-Frame copies use OpenGL ES 3.2 when available and framebuffer blits on ES 3.0 and 3.1. Offscreen contexts can use a pbuffer when the Android driver needs a surface.
+Winblow 0.3 adds its own native graphics bridge. Each presenting client owns a shared EGL context and copy resources. The bridge checks copied pixels before use, selects core or extension image copies when available, falls back to framebuffer blits, and uses a bounded readback buffer if those fail. Readback is a slower recovery path. Copy errors disable the failing path for that client. Clipping preserves presentation offsets, and GPU fences order copied frames before the compositor reads them. Offscreen contexts can use a pbuffer when the Android driver needs a surface.
+
+Hardware buffers now declare both GPU sampling and rendering usage. Failed allocations, CPU mappings and EGL image imports are checked, and image creation no longer retains an extra buffer reference.
+
+Use **Graphics check** in the desktop menu to run a pixel-copy test and copy a diagnostic report. It includes Android's advertised Vulkan version, the probed system-driver version, push-constant limits, required shader features, recommended settings and frame-copy counters. The system Vulkan path uses measured capabilities to reject known incompatible DXVK 3 configurations. A timed-out probe leaves the portable graphics paths available.
+
+The bridge uses Android's GPU driver, Mesa and the existing translators. It is original presentation and compatibility code, not a replacement kernel driver or a new DirectX implementation. Passing a compositor check does not establish Windows game compatibility. The Vulkan probe covers the system driver used by Vortek; custom Turnip still requires testing inside the guest. Windows kernel drivers, unsupported GPU instructions and kernel anti-cheat cannot be supplied by the bridge.
 
 ## Build
 
@@ -42,7 +48,9 @@ sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;34.0.0' 'ndk;24.
 ./scripts/build.sh
 ~~~
 
-The build fetches the pinned Winlator source, applies the Winblow patches, verifies the extra graphics packages, relocates the prebuilt runtime to Winblow's separate Android package and validates the signed debug APK. The result is dist/Winblow-0.2.0-arm64.apk. The generated Android Studio project lives under .build/engine-* and can also be prepared with ./scripts/prepare-source.sh.
+The build fetches the pinned Winlator source, applies the Winblow patches, verifies the extra graphics packages, relocates the prebuilt runtime to Winblow's separate Android package and validates the signed debug APK. The result is dist/Winblow-0.3.0-arm64.apk. The generated Android Studio project lives under .build/engine-* and can also be prepared with ./scripts/prepare-source.sh.
+
+The native rendering test needs a C compiler, EGL/GLES development headers and Mesa's software renderer. Run `scripts/test-graphics-bridge.sh` to check copied pixels, clipping, GL state restoration, image-format fallback and context isolation. `scripts/test-graphics-capabilities.sh` checks the Vulkan preflight policy. GitHub Actions runs these alongside the existing graphics preset and Windows file-validation tests. Physical Android GPUs and Windows games still need device testing.
 
 GitHub Actions builds the same APK and provides it as an artifact for each successful main-branch run.
 
