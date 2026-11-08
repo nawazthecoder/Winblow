@@ -46,6 +46,8 @@ The build fetches the pinned Winlator source, applies the Winblow patches, verif
 
 GitHub Actions builds the same APK and provides it as an artifact for each successful main-branch run.
 
+These are development builds signed with the builder's `~/.android/debug.keystore`. Preserve that private key for future updates. Builds from a fresh machine or CI runner can use a different signer and require a fresh install. Copy needed C: files to the Downloads drive before uninstalling an older build; uninstalling deletes private app data.
+
 ## Sources and licenses
 
 Winblow's app changes use the LGPL 2.1 license. The build uses Wine's built-in Windows components. It filters the upstream optional native Windows DLL packs and Microsoft core fonts from the generated app.
