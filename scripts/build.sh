@@ -9,7 +9,9 @@ export ANDROID_HOME="$sdk"
 source_dir="$(bash "$repo/scripts/prepare-source.sh")"
 (
     cd "$source_dir"
-    bash ./gradlew --no-daemon --console=plain :app:assembleDebug "$@"
+    bash ./gradlew --no-daemon --console=plain \
+        "-Dorg.gradle.jvmargs=${WINBLOW_GRADLE_JVM_ARGS:--Xmx2048m -Dfile.encoding=UTF-8}" \
+        :app:assembleDebug "$@"
 )
 
 mkdir -p "$repo/dist"
